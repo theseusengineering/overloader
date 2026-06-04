@@ -2521,7 +2521,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.4", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.5", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
