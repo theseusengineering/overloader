@@ -1364,10 +1364,15 @@ async function runAction(action, target) {
       render();
       break;
     case "save-cloud-config":
-      saveCloudSettingsFromForm();
-      cloudStatus = readCloudStatus();
-      renderToast("Cloud settings saved");
-      render();
+      try {
+        saveCloudSettingsFromForm();
+        cloudStatus = readCloudStatus();
+        modal = null;
+        renderToast("Cloud settings saved");
+        render();
+      } catch (error) {
+        alert(`Cloud settings not saved: ${error.message}`);
+      }
       break;
     case "clear-cloud-config":
       if (!confirm("Clear cloud sync settings from this device?")) return;
@@ -2383,7 +2388,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.0");
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.1");
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
