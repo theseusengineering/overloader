@@ -7,6 +7,15 @@ import {
 } from "./data.js";
 import { loadState, replaceState, saveState } from "./storage.js";
 import {
+  clearCloudConfig,
+  pullCloudState,
+  pushCloudState,
+  readCloudConfig,
+  readCloudStatus,
+  saveCloudConfig,
+  syncCloudState
+} from "./sync.js";
+import {
   addExerciseToSession,
   addSetToSessionExercise,
   clone,
@@ -40,6 +49,8 @@ let categoryFilter = "";
 let toast = "";
 let toastTimer = null;
 let workoutClockTimer = null;
+let cloudStatus = readCloudStatus();
+let cloudSyncTimer = null;
 const OTHER_LOCATION_VALUE = "__other__";
 const CUSTOM_TAG_VALUE = "__custom_tag__";
 const DEFAULT_CATEGORY_TAGS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Other"];
@@ -53,6 +64,7 @@ init().catch((error) => {
 
 async function init() {
   state = await loadState();
+  cloudStatus = readCloudStatus();
   bindGlobalEvents();
   render();
   startWorkoutClockTicker();
@@ -86,6 +98,24 @@ function bindGlobalEvents() {
 
 async function persist() {
   state = await saveState(state);
+  queueCloudAutoPush();
+}
+
+function queueCloudAutoPush() {
+  cloudStatus = readCloudStatus();
+  if (!cloudStatus.readyForAutoSync) return;
+  clearTimeout(cloudSyncTimer);
+  cloudSyncTimer = setTimeout(async () => {
+    try {
+      await pushCloudState(state);
+      cloudStatus = readCloudStatus();
+      if (currentView === "data") render();
+    } catch (error) {
+      console.warn("Cloud auto sync failed", error);
+      cloudStatus = readCloudStatus();
+      if (currentView === "data") render();
+    }
+  }, 1500);
 }
 
 function render() {
@@ -377,7 +407,9 @@ function renderDataView() {
       <div class="stat-card"><strong>${state.templates.length}</strong><span>templates</span></div>
       <div class="stat-card"><strong>${state.exercises.length}</strong><span>exercises</span></div>
     </div>
+    ${renderCloudSyncPanel()}
     <div class="data-actions">
+      <button class="primary-wide" data-action="cloud-sync-now">${icon("cloud")} Sync now</button>
       <button class="primary-wide" data-action="export-backup">${icon("download")} Export backup</button>
       <button class="secondary-wide" data-action="export-exercises">${icon("download")} Push exercises to repo JSON</button>
       <button class="secondary-wide" data-action="export-templates">${icon("download")} Push templates to repo JSON</button>
@@ -387,6 +419,33 @@ function renderDataView() {
       </label>
       <button class="secondary-wide" data-action="reset-seed">Reload seed data</button>
     </div>
+  `;
+}
+
+function renderCloudSyncPanel() {
+  cloudStatus = readCloudStatus();
+  const statusLabel = cloudStatus.configured ? "Configured for this device" : "Not configured";
+  const statusClass = cloudStatus.configured ? "ok" : "off";
+  return `
+    <section class="sync-card">
+      <div class="sync-title-row">
+        <div>
+          <h2>Cloud Sync</h2>
+          <span>${escapeHtml(statusLabel)}</span>
+        </div>
+        <span class="status-pill ${statusClass}">${escapeHtml(cloudStatus.autoSync ? "Auto" : "Manual")}</span>
+      </div>
+      <div class="sync-meta">
+        <span>Last sync <strong>${escapeHtml(formatSyncDate(cloudStatus.lastSyncAt))}</strong></span>
+        <span>Mode <strong>${escapeHtml(cloudStatus.lastMode || "none")}</strong></span>
+        ${cloudStatus.lastError ? `<span class="sync-error">Error <strong>${escapeHtml(cloudStatus.lastError)}</strong></span>` : ""}
+      </div>
+      <div class="sync-actions">
+        <button class="secondary-button" data-action="open-cloud-sync">${icon("settings")} Settings</button>
+        <button class="secondary-button" data-action="cloud-pull" ${cloudStatus.configured ? "" : "disabled"}>${icon("download")} Pull</button>
+        <button class="secondary-button" data-action="cloud-push" ${cloudStatus.configured ? "" : "disabled"}>${icon("upload")} Push</button>
+      </div>
+    </section>
   `;
 }
 
@@ -527,6 +586,7 @@ function renderModal() {
   if (modal.type === "start-location") return renderStartLocationModal();
   if (modal.type === "focus") return renderFocusModal();
   if (modal.type === "data-menu") return renderDataMenu();
+  if (modal.type === "cloud-sync") return renderCloudSyncModal();
   if (modal.type === "session-actions") return renderSessionActions();
   return "";
 }
@@ -880,11 +940,40 @@ function renderFocusModal() {
 function renderDataMenu() {
   return renderModalFrame("Data", `
     <div class="menu-list">
+      <button data-action="open-cloud-sync">${icon("cloud")} Cloud Sync</button>
       <button data-action="export-backup">${icon("download")} Export backup</button>
       <button data-action="export-exercises">${icon("download")} Push exercises to repo JSON</button>
       <button data-action="export-templates">${icon("download")} Push templates to repo JSON</button>
       <button data-view="data">${icon("database")} Open data screen</button>
     </div>
+  `);
+}
+
+function renderCloudSyncModal() {
+  const config = readCloudConfig();
+  const draft = modal.draft ?? {};
+  const url = draft.url ?? config?.url ?? "";
+  const anonKey = draft.anonKey ?? config?.anonKey ?? "";
+  const syncSecret = draft.syncSecret ?? config?.syncSecret ?? "";
+  const autoSync = draft.autoSync ?? config?.autoSync ?? false;
+  return renderModalFrame("Cloud Sync", `
+    <form class="settings-form" data-form="cloud-sync">
+      <label>Supabase URL<input name="url" value="${escapeAttr(url)}" placeholder="https://project-ref.supabase.co"></label>
+      <label>Anon public key<input name="anonKey" value="${escapeAttr(anonKey)}" autocomplete="off" spellcheck="false"></label>
+      <label>Sync secret<input name="syncSecret" type="password" value="${escapeAttr(syncSecret)}" autocomplete="current-password"></label>
+      <label class="check-row">
+        <input name="autoSync" type="checkbox" ${autoSync ? "checked" : ""}>
+        <span>Auto push local saves after first sync</span>
+      </label>
+    </form>
+    <div class="sync-explainer">
+      <p>One private cloud snapshot is shared by your devices. Sync Now pulls first on a new device, then compares timestamps after that.</p>
+    </div>
+  `, `
+    <button class="secondary-wide danger-text" data-action="clear-cloud-config">Clear</button>
+    <button class="secondary-wide" data-action="cloud-pull" ${cloudStatus.configured ? "" : "disabled"}>Pull Cloud</button>
+    <button class="secondary-wide" data-action="cloud-push" ${cloudStatus.configured ? "" : "disabled"}>Push Local</button>
+    <button class="primary-wide" data-action="save-cloud-config">Save Settings</button>
   `);
 }
 
@@ -1269,6 +1358,33 @@ async function runAction(action, target) {
       await persist();
       renderToast("Template saved");
       render();
+      break;
+    case "open-cloud-sync":
+      modal = { type: "cloud-sync" };
+      render();
+      break;
+    case "save-cloud-config":
+      saveCloudSettingsFromForm();
+      cloudStatus = readCloudStatus();
+      renderToast("Cloud settings saved");
+      render();
+      break;
+    case "clear-cloud-config":
+      if (!confirm("Clear cloud sync settings from this device?")) return;
+      clearCloudConfig();
+      cloudStatus = readCloudStatus();
+      modal = null;
+      renderToast("Cloud settings cleared");
+      render();
+      break;
+    case "cloud-sync-now":
+      await runCloudSync("sync");
+      break;
+    case "cloud-pull":
+      await runCloudSync("pull");
+      break;
+    case "cloud-push":
+      await runCloudSync("push");
       break;
     case "export-backup":
       exportBackup();
@@ -1945,6 +2061,66 @@ function closeModal() {
   render();
 }
 
+function saveCloudSettingsFromForm() {
+  const form = document.querySelector("[data-form='cloud-sync']");
+  if (!form) return readCloudConfig();
+  const data = new FormData(form);
+  return saveCloudConfig({
+    url: data.get("url"),
+    anonKey: data.get("anonKey"),
+    syncSecret: data.get("syncSecret"),
+    autoSync: data.get("autoSync") === "on"
+  });
+}
+
+async function runCloudSync(mode) {
+  try {
+    if (document.querySelector("[data-form='cloud-sync']")) {
+      saveCloudSettingsFromForm();
+    }
+    cloudStatus = readCloudStatus();
+    if (!cloudStatus.configured) {
+      modal = { type: "cloud-sync" };
+      renderToast("Save cloud settings first");
+      render();
+      return;
+    }
+    if (state.activeSession && mode !== "push") {
+      alert("Finish or cancel the active workout before pulling cloud data.");
+      return;
+    }
+
+    let result;
+    if (mode === "pull") {
+      if (!confirm("Pull cloud data and replace local OverLoader data on this device?")) return;
+      result = await pullCloudState();
+    } else if (mode === "push") {
+      result = await pushCloudState(state);
+    } else {
+      result = await syncCloudState(state);
+    }
+
+    if (result.state) {
+      state = await replaceState(result.state);
+    }
+    cloudStatus = readCloudStatus();
+    renderToast(cloudSyncMessage(result));
+    render();
+  } catch (error) {
+    cloudStatus = readCloudStatus();
+    alert(`Cloud sync failed: ${error.message}`);
+    render();
+  }
+}
+
+function cloudSyncMessage(result) {
+  if (result.mode === "pulled") return "Pulled cloud data";
+  if (result.mode === "pushed") return "Pushed local data";
+  if (result.mode === "clean") return "Cloud already current";
+  if (result.mode === "empty") return "No cloud data yet";
+  return "Cloud sync complete";
+}
+
 function exportBackup() {
   downloadJson(state, `overloader-backup-${dateStamp()}.json`);
   renderToast("Backup exported");
@@ -2109,6 +2285,18 @@ function formatDateTime(value) {
   }).format(new Date(value));
 }
 
+function formatSyncDate(value) {
+  if (!value) return "never";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "never";
+  return new Intl.DateTimeFormat("en-AU", {
+    day: "numeric",
+    month: "short",
+    hour: "numeric",
+    minute: "2-digit"
+  }).format(date);
+}
+
 function formatDateTimeInput(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
@@ -2148,6 +2336,7 @@ function icon(name) {
     database: `<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.66 3.58 3 8 3s8-1.34 8-3V5"/><path d="M4 11v6c0 1.66 3.58 3 8 3s8-1.34 8-3v-6"/>`,
     check: `<path d="m5 12 4 4L19 6"/>`,
     chart: `<path d="M4 19V5"/><path d="M4 19h16"/><circle cx="8" cy="15" r="2"/><circle cx="13" cy="11" r="2"/><circle cx="18" cy="7" r="2"/><path d="m9.5 13.5 2-1.5M14.5 9.5l2-1.5"/>`,
+    cloud: `<path d="M17.5 19H8a5 5 0 1 1 1.1-9.9A6 6 0 0 1 20 12.5 3.5 3.5 0 0 1 17.5 19Z"/>`,
     down: `<path d="m6 9 6 6 6-6"/>`,
     grip: `<circle cx="9" cy="6" r="1.2"/><circle cx="15" cy="6" r="1.2"/><circle cx="9" cy="12" r="1.2"/><circle cx="15" cy="12" r="1.2"/><circle cx="9" cy="18" r="1.2"/><circle cx="15" cy="18" r="1.2"/>`,
     history: `<path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v6h6"/><path d="M12 7v5l3 2"/>`,
@@ -2162,6 +2351,7 @@ function icon(name) {
     up: `<path d="m18 15-6-6-6 6"/>`,
     x: `<path d="M18 6 6 18M6 6l12 12"/>`,
     note: `<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/>`,
+    settings: `<path d="M12 15.5A3.5 3.5 0 1 0 12 8a3.5 3.5 0 0 0 0 7.5Z"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.04.04a2 2 0 1 1-2.83 2.83l-.04-.04A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6V20a2 2 0 1 1-4 0v-.05a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.04.04a2 2 0 1 1-2.83-2.83l.04-.04A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H4a2 2 0 1 1 0-4h.05a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.04-.04a2 2 0 1 1 2.83-2.83l.04.04A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6V4a2 2 0 1 1 4 0v.05a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.04-.04a2 2 0 1 1 2.83 2.83l-.04.04A1.7 1.7 0 0 0 19.4 9c.22.35.42.68.6 1H20a2 2 0 1 1 0 4h-.05a1.7 1.7 0 0 0-.55 1Z"/>`,
     swap: `<path d="M7 7h11l-3-3"/><path d="M17 17H6l3 3"/>`
   };
   return `<svg viewBox="0 0 24 24" aria-hidden="true">${paths[name] ?? paths.more}</svg>`;
@@ -2193,7 +2383,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.2.8");
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.0");
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
