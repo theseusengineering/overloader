@@ -30,6 +30,7 @@ import {
   normalizeInputWeight,
   overwriteTemplateFromActive,
   percentageDelta,
+  recalculatePendingWorkingSets,
   rirToRpe,
   replaceSessionExercise,
   rpeToRir,
@@ -260,6 +261,7 @@ function renderSessionExercise(sessionExercise) {
   const previous = latestPerformance(state, sessionExercise.exerciseId);
   const kgLabel = exercise?.loadMode === "assisted" ? "-kg" : "kg";
   const weightHeader = exercise?.loadMode === "bodyweight" ? "Load" : kgLabel;
+  const reason = progressionContext(sessionExercise);
   return `
     <article class="session-exercise" data-session-exercise-id="${sessionExercise.id}">
       <div class="exercise-title-row">
@@ -274,6 +276,7 @@ function renderSessionExercise(sessionExercise) {
       </div>
       ${sessionExercise.note ? `<div class="sticky-note">${escapeHtml(sessionExercise.note)}</div>` : ""}
       ${previous ? `<div class="previous-context">${escapeHtml(previous.workoutName)} · ${formatDate(previous.performedAt)}</div>` : ""}
+      ${reason ? `<div class="progression-context">${escapeHtml(reason)}</div>` : ""}
       <div class="set-table">
         <div class="set-row table-head">
           <span>Set</span>
@@ -300,7 +303,7 @@ function renderSetRow(sessionExercise, exercise, set) {
   const deltaText = delta == null ? "" : `${delta >= 0 ? "+" : ""}${formatNumber(delta)}%`;
   const completedClass = set.completed ? "completed" : "pending";
   return `
-    <div class="set-row ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">
+    <div class="set-row ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" title="${escapeAttr(set.suggestionReason ?? "")}">
       <button class="set-badge ${set.type}" data-action="cycle-set-type" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">${escapeHtml(set.label)}</button>
       <button class="previous-cell" data-action="open-exercise-history" data-exercise-id="${exercise.id}">
         ${formatPrevious(set, exercise)}
@@ -321,6 +324,12 @@ function renderSetRow(sessionExercise, exercise, set) {
       <button class="check-button ${set.completed ? "is-complete" : ""}" data-action="toggle-set-complete" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" aria-label="Toggle complete">${icon("check")}</button>
     </div>
   `;
+}
+
+function progressionContext(sessionExercise) {
+  const pending = sessionExercise.sets.find((set) => set.type === "working" && !set.completed && set.suggestionReason);
+  const working = pending ?? sessionExercise.sets.find((set) => set.type === "working" && set.suggestionReason);
+  return working?.suggestionReason ?? "";
 }
 
 function renderTemplatesView() {
@@ -1200,6 +1209,7 @@ async function runAction(action, target) {
       updateSet(target, (set) => {
         set.completed = !set.completed;
       });
+      recalculatePendingWorkingSets(state, target.dataset.sessionExerciseId);
       await persist();
       render();
       break;
@@ -1208,12 +1218,14 @@ async function runAction(action, target) {
         set.type = nextSetType(set.type);
       });
       normalizeActiveExercise(target.dataset.sessionExerciseId);
+      recalculatePendingWorkingSets(state, target.dataset.sessionExerciseId);
       state.activeSession.templateDirty = true;
       await persist();
       render();
       break;
     case "add-working-set":
       addSetToSessionExercise(state, target.dataset.sessionExerciseId, "working");
+      recalculatePendingWorkingSets(state, target.dataset.sessionExerciseId);
       await persist();
       render();
       break;
@@ -1613,6 +1625,7 @@ function handleInput(event) {
   if (markModalFormDirty(target)) return;
 
   if (target.dataset.field && target.dataset.setId) {
+    let editedCompletedSet = false;
     updateSet(target, (set, exercise) => {
       const field = target.dataset.field;
       set.touched = true;
@@ -1626,8 +1639,14 @@ function handleInput(event) {
         set.rir = target.value === "" ? "" : clampInputValue(target.value, 0, 10);
         set.rpe = rirToRpe(set.rir);
       }
+      editedCompletedSet = Boolean(set.completed);
     });
-    saveState(state);
+    recalculatePendingWorkingSets(state, target.dataset.sessionExerciseId);
+    void persist();
+    if (editedCompletedSet) {
+      render();
+      restoreInputFocus(`[data-field='${cssEscape(target.dataset.field)}'][data-set-id='${cssEscape(target.dataset.setId)}']`);
+    }
   }
 
   if (target.dataset.field === "template-warmups" || target.dataset.field === "template-working") {
@@ -2502,7 +2521,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.3", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.4", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
