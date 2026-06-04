@@ -1,0 +1,274 @@
+{
+  "schema": "overloader-templates",
+  "version": 1,
+  "exportedAt": "2026-06-03T13:28:28.733Z",
+  "count": 7,
+  "templates": [
+    {
+      "id": "legs-balmain",
+      "name": "Legs - Balmain Fitness",
+      "location": "Balmain Fitness",
+      "updatedAt": "2026-06-02T06:17:06.034Z",
+      "exercises": [
+        {
+          "id": "tpl-row-ew72913b",
+          "exerciseId": "exercise-d6829ae9-edfa-408b-a929-737dc9a0a236",
+          "warmupSets": 2,
+          "workingSets": 2
+        },
+        {
+          "id": "tpl-row-mqsacsoc",
+          "exerciseId": "exercise-4c61fe47-6aa8-4545-8545-609b95b4ac3d",
+          "warmupSets": 3,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-q053gmpk",
+          "exerciseId": "exercise-c334aa8a-e12b-4568-a84b-cb292afa3abd",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-y3babim3",
+          "exerciseId": "exercise-0962feec-ce41-4ebd-ab1d-f37dbbb234d5",
+          "warmupSets": 1,
+          "workingSets": 2
+        },
+        {
+          "id": "tpl-row-yeqfc8v2",
+          "exerciseId": "seated-calf-raise-plate-loaded",
+          "warmupSets": 0,
+          "workingSets": 3
+        }
+      ]
+    },
+    {
+      "id": "pull-balmain",
+      "name": "Pull - Balmain Fitness",
+      "location": "Balmain Fitness",
+      "updatedAt": "2026-06-02T06:17:06.034Z",
+      "exercises": [
+        {
+          "id": "tpl-row-aa9v907b",
+          "exerciseId": "pull-up-assisted",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-euhn6bgn",
+          "exerciseId": "rear-deltoid-fly",
+          "warmupSets": 1,
+          "workingSets": 4
+        },
+        {
+          "id": "tpl-row-c7rnrhnb",
+          "exerciseId": "seated-row-plate-loaded-balmain",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-5fer2pr9",
+          "exerciseId": "jpg-kneeled-lat-pulldown-single-arm",
+          "warmupSets": 1,
+          "workingSets": 4
+        },
+        {
+          "id": "tpl-row-jzi5kgwt",
+          "exerciseId": "bicep-curl-cable",
+          "warmupSets": 1,
+          "workingSets": 4
+        }
+      ]
+    },
+    {
+      "id": "push-balmain",
+      "name": "Push - Balmain Fitness",
+      "location": "Balmain Fitness",
+      "updatedAt": "2026-06-03T11:07:30.867Z",
+      "exercises": [
+        {
+          "id": "tpl-row-qz6wsucu",
+          "exerciseId": "chest-press-machine-balmain",
+          "warmupSets": 3,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-apg6bdzv",
+          "exerciseId": "shoulder-press-plate-loaded",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-flha94p3",
+          "exerciseId": "knee-raise-captains-chair",
+          "warmupSets": 0,
+          "workingSets": 4
+        },
+        {
+          "id": "tpl-row-2h9s1wb1",
+          "exerciseId": "triceps-pushdown-cable-straight-bar",
+          "warmupSets": 2,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-t3gc9c5k",
+          "exerciseId": "lateral-raise-cable",
+          "warmupSets": 1,
+          "workingSets": 4
+        }
+      ]
+    },
+    {
+      "id": "legs-scos",
+      "name": "Legs - SCOS",
+      "location": "SCOS",
+      "updatedAt": "2026-06-02T06:17:06.034Z",
+      "exercises": [
+        {
+          "id": "tpl-row-852diy92",
+          "exerciseId": "seated-leg-press-machine",
+          "warmupSets": 2,
+          "workingSets": 2
+        },
+        {
+          "id": "tpl-row-m01ara5m",
+          "exerciseId": "leg-press",
+          "warmupSets": 3,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-e58odc2y",
+          "exerciseId": "leg-extension-machine",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-c5r1thqy",
+          "exerciseId": "seated-leg-curl-machine",
+          "warmupSets": 1,
+          "workingSets": 2
+        }
+      ]
+    },
+    {
+      "id": "pull-scos",
+      "name": "Pull - SCOS",
+      "location": "SCOS",
+      "updatedAt": "2026-06-02T06:17:06.034Z",
+      "exercises": [
+        {
+          "id": "tpl-row-t1224pv1",
+          "exerciseId": "exercise-4a3c6744-330c-4542-af4f-71dba7a15d4e",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-t6uys5n0",
+          "exerciseId": "diverging-row",
+          "warmupSets": 2,
+          "workingSets": 4
+        },
+        {
+          "id": "tpl-row-zzei4j2w",
+          "exerciseId": "seated-row-plate-loaded",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-aqdsyroy",
+          "exerciseId": "exercise-1015a3a3-3c64-4f06-b7f3-c924cdec1115",
+          "warmupSets": 1,
+          "workingSets": 4
+        },
+        {
+          "id": "tpl-row-c7wun6j7",
+          "exerciseId": "exercise-09c574ef-d834-42ae-b88e-2c3780324daa",
+          "warmupSets": 1,
+          "workingSets": 4
+        }
+      ]
+    },
+    {
+      "id": "push-scos",
+      "name": "Push - SCOS",
+      "location": "SCOS",
+      "updatedAt": "2026-06-03T12:01:59.342Z",
+      "exercises": [
+        {
+          "id": "tpl-row-jpdlnp36",
+          "exerciseId": "chest-press-plate-loaded",
+          "warmupSets": 2,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-ygn0f66g",
+          "exerciseId": "exercise-60aa89f0-153a-4e22-899f-936705c2b176",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-5bde2fa5-96c7-48e0-a4d5-69c0fad28c05",
+          "exerciseId": "knee-raise-captains-chair",
+          "warmupSets": 0,
+          "workingSets": 4
+        },
+        {
+          "id": "tpl-row-zdnsxcav",
+          "exerciseId": "exercise-eb39ef7c-0b34-4ac5-9563-a916d7e846c0",
+          "warmupSets": 2,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-d08ky419",
+          "exerciseId": "exercise-f7a9c5c5-740f-4184-b59a-8419073a38ec",
+          "warmupSets": 1,
+          "workingSets": 4
+        }
+      ]
+    },
+    {
+      "id": "upper-scos",
+      "name": "Upper - SCOS",
+      "location": "SCOS",
+      "updatedAt": "2026-06-03T11:24:41.119Z",
+      "exercises": [
+        {
+          "id": "tpl-row-5xw943cr",
+          "exerciseId": "chest-press-plate-loaded",
+          "warmupSets": 1,
+          "workingSets": 4
+        },
+        {
+          "id": "tpl-row-yeqbv2lm",
+          "exerciseId": "lat-pulldown-plate-loaded",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-rznjwv1r",
+          "exerciseId": "exercise-60aa89f0-153a-4e22-899f-936705c2b176",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-vqo7je9m",
+          "exerciseId": "seated-row-plate-loaded",
+          "warmupSets": 1,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-krw0x0nk",
+          "exerciseId": "exercise-eb39ef7c-0b34-4ac5-9563-a916d7e846c0",
+          "warmupSets": 2,
+          "workingSets": 3
+        },
+        {
+          "id": "tpl-row-oc4c26d0",
+          "exerciseId": "exercise-09c574ef-d834-42ae-b88e-2c3780324daa",
+          "warmupSets": 1,
+          "workingSets": 3
+        }
+      ]
+    }
+  ]
+}

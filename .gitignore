@@ -1,0 +1,20 @@
+.DS_Store
+Thumbs.db
+
+# Local environment and dependency folders
+.env
+.env.*
+node_modules/
+__pycache__/
+*.pyc
+
+# Local screenshots and source/reference assets not needed by the deployed PWA
+Exercises/
+Templates/
+UI references/
+screenshots/
+
+# Raw/imported personal exports and dated backup downloads
+historical_strong_workouts.csv
+overloader-*.json
+temlates.json
