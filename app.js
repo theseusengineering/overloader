@@ -56,11 +56,20 @@ const CUSTOM_TAG_VALUE = "__custom_tag__";
 const DEFAULT_CATEGORY_TAGS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Other"];
 const DEFAULT_EQUIPMENT_TAGS = ["machine", "plate-loaded", "cable", "dumbbell", "barbell", "bodyweight", "assisted"];
 
+canonicalizeAppUrl();
 renderBoot("Loading OverLoader");
 init().catch((error) => {
   console.error("OverLoader failed to start", error);
   renderBoot("OverLoader failed to start", error?.message ?? String(error));
 });
+
+function canonicalizeAppUrl() {
+  const url = new URL(window.location.href);
+  if (!url.searchParams.has("v")) return;
+  url.searchParams.delete("v");
+  const next = `${url.pathname}${url.search}${url.hash}`;
+  window.history.replaceState(window.history.state, "", next);
+}
 
 async function init() {
   state = await loadState();
@@ -2388,7 +2397,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.1");
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.2", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
