@@ -1,4 +1,4 @@
-create extension if not exists pgcrypto;
+create extension if not exists pgcrypto with schema extensions;
 
 create table if not exists public.overloader_sync (
   id text primary key default 'main',
@@ -22,7 +22,7 @@ begin
   end if;
 
   insert into public.overloader_sync (id, secret_hash)
-  values ('main', crypt(sync_secret, gen_salt('bf')))
+  values ('main', extensions.crypt(sync_secret, extensions.gen_salt('bf')))
   on conflict (id) do update
     set secret_hash = excluded.secret_hash,
         updated_at = now();
@@ -39,7 +39,7 @@ begin
     select 1
     from public.overloader_sync
     where id = 'main'
-      and secret_hash = crypt(p_sync_secret, secret_hash)
+      and secret_hash = extensions.crypt(p_sync_secret, secret_hash)
   ) then
     raise exception 'Invalid OverLoader sync secret.';
   end if;
