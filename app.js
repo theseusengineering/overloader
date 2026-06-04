@@ -51,6 +51,7 @@ let toastTimer = null;
 let workoutClockTimer = null;
 let cloudStatus = readCloudStatus();
 let cloudSyncTimer = null;
+let cloudSyncMode = "";
 const OTHER_LOCATION_VALUE = "__other__";
 const CUSTOM_TAG_VALUE = "__custom_tag__";
 const DEFAULT_CATEGORY_TAGS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Other"];
@@ -69,6 +70,11 @@ function canonicalizeAppUrl() {
   url.searchParams.delete("v");
   const next = `${url.pathname}${url.search}${url.hash}`;
   window.history.replaceState(window.history.state, "", next);
+}
+
+function isLocalDevelopmentHost() {
+  return ["127.0.0.1", "localhost"].includes(window.location.hostname)
+    || window.location.hostname.startsWith("192.168.");
 }
 
 async function init() {
@@ -420,8 +426,7 @@ function renderDataView() {
     <div class="data-actions">
       <button class="primary-wide" data-action="cloud-sync-now">${icon("cloud")} Sync now</button>
       <button class="primary-wide" data-action="export-backup">${icon("download")} Export backup</button>
-      <button class="secondary-wide" data-action="export-exercises">${icon("download")} Push exercises to repo JSON</button>
-      <button class="secondary-wide" data-action="export-templates">${icon("download")} Push templates to repo JSON</button>
+      ${renderLocalRepoActions()}
       <label class="file-import">
         ${icon("upload")} Import backup
         <input type="file" accept="application/json,.json" data-action="import-backup">
@@ -431,31 +436,114 @@ function renderDataView() {
   `;
 }
 
+function renderLocalRepoActions() {
+  if (!isLocalDevelopmentHost()) return "";
+  return `
+    <button class="secondary-wide" data-action="export-exercises">${icon("download")} Push exercises to repo JSON</button>
+    <button class="secondary-wide" data-action="export-templates">${icon("download")} Push templates to repo JSON</button>
+  `;
+}
+
+function renderLocalRepoMenuActions() {
+  if (!isLocalDevelopmentHost()) return "";
+  return `
+      <button data-action="export-exercises">${icon("download")} Push exercises to repo JSON</button>
+      <button data-action="export-templates">${icon("download")} Push templates to repo JSON</button>
+  `;
+}
+
 function renderCloudSyncPanel() {
   cloudStatus = readCloudStatus();
-  const statusLabel = cloudStatus.configured ? "Configured for this device" : "Not configured";
-  const statusClass = cloudStatus.configured ? "ok" : "off";
+  const summary = cloudSyncSummary();
   return `
     <section class="sync-card">
       <div class="sync-title-row">
         <div>
           <h2>Cloud Sync</h2>
-          <span>${escapeHtml(statusLabel)}</span>
+          <span>${escapeHtml(summary.detail)}</span>
         </div>
-        <span class="status-pill ${statusClass}">${escapeHtml(cloudStatus.autoSync ? "Auto" : "Manual")}</span>
+        <span class="status-pill ${summary.className}">${escapeHtml(summary.pill)}</span>
       </div>
+      <p class="sync-summary">${escapeHtml(summary.message)}</p>
       <div class="sync-meta">
         <span>Last sync <strong>${escapeHtml(formatSyncDate(cloudStatus.lastSyncAt))}</strong></span>
-        <span>Mode <strong>${escapeHtml(cloudStatus.lastMode || "none")}</strong></span>
+        <span>Last action <strong>${escapeHtml(syncModeLabel(cloudStatus.lastMode))}</strong></span>
+        ${cloudStatus.lastStateUpdatedAt ? `<span>Local saved <strong>${escapeHtml(formatSyncDate(cloudStatus.lastStateUpdatedAt))}</strong></span>` : ""}
+        ${cloudStatus.lastRemoteUpdatedAt ? `<span>Cloud saved <strong>${escapeHtml(formatSyncDate(cloudStatus.lastRemoteUpdatedAt))}</strong></span>` : ""}
         ${cloudStatus.lastError ? `<span class="sync-error">Error <strong>${escapeHtml(cloudStatus.lastError)}</strong></span>` : ""}
       </div>
       <div class="sync-actions">
         <button class="secondary-button" data-action="open-cloud-sync">${icon("settings")} Settings</button>
-        <button class="secondary-button" data-action="cloud-pull" ${cloudStatus.configured ? "" : "disabled"}>${icon("download")} Pull</button>
-        <button class="secondary-button" data-action="cloud-push" ${cloudStatus.configured ? "" : "disabled"}>${icon("upload")} Push</button>
+        <button class="secondary-button" data-action="cloud-pull" ${cloudStatus.configured && !cloudSyncMode ? "" : "disabled"}>${icon("download")} Pull</button>
+        <button class="secondary-button" data-action="cloud-push" ${cloudStatus.configured && !cloudSyncMode ? "" : "disabled"}>${icon("upload")} Push</button>
       </div>
     </section>
   `;
+}
+
+function cloudSyncSummary() {
+  if (cloudSyncMode) {
+    return {
+      pill: "Syncing",
+      className: "working",
+      detail: `${cloudSyncActionLabel(cloudSyncMode)} in progress`,
+      message: "Keep this tab open until the cloud operation finishes."
+    };
+  }
+  if (!cloudStatus.configured) {
+    return {
+      pill: "Off",
+      className: "off",
+      detail: "Not configured",
+      message: "Save Supabase settings to enable phone and laptop sync."
+    };
+  }
+  if (cloudStatus.lastError) {
+    return {
+      pill: "Error",
+      className: "error",
+      detail: "Last cloud sync failed",
+      message: "Open settings or run Sync now after fixing the error shown below."
+    };
+  }
+  if (cloudStatus.autoSync && cloudStatus.readyForAutoSync) {
+    return {
+      pill: "Auto",
+      className: "ok",
+      detail: "Auto push active",
+      message: "Local saves push to Supabase shortly after changes."
+    };
+  }
+  if (cloudStatus.autoSync) {
+    return {
+      pill: "Auto",
+      className: "warn",
+      detail: "Auto push waiting",
+      message: "Run Sync now once on this device to arm automatic pushes."
+    };
+  }
+  return {
+    pill: "Manual",
+    className: cloudStatus.lastSyncAt ? "ok" : "warn",
+    detail: cloudStatus.lastSyncAt ? "Manual sync ready" : "Manual sync not run",
+    message: "Use Sync now after edits, or enable auto push in settings."
+  };
+}
+
+function syncModeLabel(mode) {
+  if (mode === "sync") return "Sync now";
+  if (mode === "pull" || mode === "pulled") return "Pulled cloud to local";
+  if (mode === "push" || mode === "pushed") return "Pushed local to cloud";
+  if (mode === "clean") return "Already current";
+  if (mode === "empty") return "No cloud data";
+  if (mode === "auto") return "Auto push";
+  return "none";
+}
+
+function cloudSyncActionLabel(mode) {
+  if (mode === "pull") return "Pulling cloud data";
+  if (mode === "push") return "Pushing local data";
+  return "Syncing data";
 }
 
 function renderHistoryView() {
@@ -951,8 +1039,7 @@ function renderDataMenu() {
     <div class="menu-list">
       <button data-action="open-cloud-sync">${icon("cloud")} Cloud Sync</button>
       <button data-action="export-backup">${icon("download")} Export backup</button>
-      <button data-action="export-exercises">${icon("download")} Push exercises to repo JSON</button>
-      <button data-action="export-templates">${icon("download")} Push templates to repo JSON</button>
+      ${renderLocalRepoMenuActions()}
       <button data-view="data">${icon("database")} Open data screen</button>
     </div>
   `);
@@ -1406,11 +1493,23 @@ async function runAction(action, target) {
       render();
       break;
     case "export-exercises":
+      if (!isLocalDevelopmentHost()) {
+        modal = null;
+        renderToast("Repo JSON push is local development only");
+        render();
+        break;
+      }
       await exportExercisesBackup();
       modal = null;
       render();
       break;
     case "export-templates":
+      if (!isLocalDevelopmentHost()) {
+        modal = null;
+        renderToast("Repo JSON push is local development only");
+        render();
+        break;
+      }
       await exportTemplatesBackup();
       modal = null;
       render();
@@ -2103,10 +2202,14 @@ async function runCloudSync(mode) {
       alert("Finish or cancel the active workout before pulling cloud data.");
       return;
     }
+    if (mode === "pull" && !confirm("Pull cloud data and replace local OverLoader data on this device?")) {
+      return;
+    }
 
+    cloudSyncMode = mode;
+    render();
     let result;
     if (mode === "pull") {
-      if (!confirm("Pull cloud data and replace local OverLoader data on this device?")) return;
       result = await pullCloudState();
     } else if (mode === "push") {
       result = await pushCloudState(state);
@@ -2119,10 +2222,11 @@ async function runCloudSync(mode) {
     }
     cloudStatus = readCloudStatus();
     renderToast(cloudSyncMessage(result));
-    render();
   } catch (error) {
     cloudStatus = readCloudStatus();
     alert(`Cloud sync failed: ${error.message}`);
+  } finally {
+    cloudSyncMode = "";
     render();
   }
 }
@@ -2215,6 +2319,7 @@ async function pushTemplatesToRepo(payload) {
 }
 
 async function pushPayloadToRepo(endpoint, payload) {
+  if (!isLocalDevelopmentHost()) return false;
   try {
     const response = await fetch(endpoint, {
       method: "POST",
@@ -2397,7 +2502,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.2", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.3", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
