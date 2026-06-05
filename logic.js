@@ -6,6 +6,9 @@ const AGGRESSIVE_LOAD_PROGRESS = 0.05;
 const DELOAD_PERCENT = 0.05;
 const TARGET_RPE_TOLERANCE = 0.75;
 const HIGH_FATIGUE_RPE = 9.5;
+const INTRA_SET_DROP_RPE_GAP = 1;
+const INTRA_SET_EASY_RPE_GAP = -1;
+const INTRA_SET_EASY_REP_BUFFER = 2;
 
 export function uid(prefix = "id") {
   if (globalThis.crypto?.randomUUID) return `${prefix}-${globalThis.crypto.randomUUID()}`;
@@ -302,31 +305,42 @@ function prescribePendingSetAfterFeedback(exercise, pendingSet, completedWorking
   const actualReps = Number(last.reps) || 0;
   const missedTarget = actualReps < Math.min(targetReps, exercise.repMin);
   const rpeGap = rpe - targetRpe;
+  const clearlyTooHard = missedTarget || rpeGap >= INTRA_SET_DROP_RPE_GAP || actualReps < exercise.repMin;
+  const clearlyTooEasy = rpeGap <= INTRA_SET_EASY_RPE_GAP && actualReps >= exercise.repMax + INTRA_SET_EASY_REP_BUFFER;
 
   if (exercise.loadMode === "bodyweight") {
-    const reps = bodyweightPendingReps(exercise, targetReps, rpeGap, missedTarget);
+    const reps = bodyweightPendingReps(exercise, targetReps, clearlyTooHard, clearlyTooEasy);
     return {
       weight: null,
       reps,
       rpe: targetRpe,
       rir: targetRir,
-      reason: pendingReason(exercise, pendingSet, last, rpeGap, missedTarget, null, reps),
-      mode: rpeGap > TARGET_RPE_TOLERANCE ? "intra-drop" : rpeGap < -1 ? "intra-progress" : "intra-hold"
+      reason: pendingReason(exercise, pendingSet, last, rpeGap, missedTarget, null, reps, clearlyTooHard, clearlyTooEasy),
+      mode: clearlyTooHard ? "intra-drop" : clearlyTooEasy ? "intra-progress" : "intra-hold"
     };
   }
 
-  const estimated = estimateLoadForTargetRpe(exercise, last, targetReps, targetRpe);
-  if (estimated == null) return null;
-  const fatiguePenalty = intraWorkoutFatiguePenalty(completedWorking, rpeGap, missedTarget);
-  const adjusted = adjustEstimatedLoadForFatigue(exercise, estimated, fatiguePenalty);
+  const adjusted = clearlyTooHard
+    ? reducedPendingLoad(exercise, last, completedWorking, targetReps, targetRpe, rpeGap, missedTarget)
+    : clearlyTooEasy
+      ? adjustedLoad(exercise, last.weight, STANDARD_LOAD_PROGRESS, "progress")
+      : roundToIncrement(last.weight, exercise.increment, exercise.loadMode);
+  if (adjusted == null) return null;
   return {
     weight: adjusted,
     reps: targetReps,
     rpe: targetRpe,
     rir: targetRir,
-    reason: pendingReason(exercise, pendingSet, last, rpeGap, missedTarget, adjusted, targetReps),
-    mode: rpeGap > TARGET_RPE_TOLERANCE ? "intra-drop" : rpeGap < -1 ? "intra-progress" : "intra-hold"
+    reason: pendingReason(exercise, pendingSet, last, rpeGap, missedTarget, adjusted, targetReps, clearlyTooHard, clearlyTooEasy),
+    mode: clearlyTooHard ? "intra-drop" : clearlyTooEasy ? "intra-progress" : "intra-hold"
   };
+}
+
+function reducedPendingLoad(exercise, last, completedWorking, targetReps, targetRpe, rpeGap, missedTarget) {
+  const estimated = estimateLoadForTargetRpe(exercise, last, targetReps, targetRpe);
+  if (estimated == null) return null;
+  const fatiguePenalty = intraWorkoutFatiguePenalty(completedWorking, rpeGap, missedTarget);
+  return adjustEstimatedLoadForFatigue(exercise, estimated, fatiguePenalty);
 }
 
 function summarizeWorkingPerformance(exercise, sets) {
@@ -338,9 +352,10 @@ function summarizeWorkingPerformance(exercise, sets) {
   const maxRpe = rpes.length ? Math.max(...rpes) : null;
   const targetRpe = Number(exercise.targetRpe) || 8;
   const missedReps = valid.some((set) => (Number(set.reps) || 0) < exercise.repMin);
-  const topOfRange = avgReps >= exercise.repMax - 0.5;
+  const minimumTopSets = Math.min(3, Math.max(1, Number(exercise.defaultWorkingSets) || 3));
+  const topOfRange = valid.length >= minimumTopSets && valid.every((set) => (Number(set.reps) || 0) >= exercise.repMax);
   const rpeAllowsProgression = avgRpe == null || avgRpe <= targetRpe + TARGET_RPE_TOLERANCE;
-  const underStimulated = avgRpe != null && avgRpe < targetRpe - 1 && avgReps >= exercise.repMin;
+  const underStimulated = avgRpe != null && avgRpe <= targetRpe - 1 && avgReps >= exercise.repMax + 1;
   const highFatigue = maxRpe != null && (maxRpe >= HIGH_FATIGUE_RPE || (avgRpe ?? 0) >= targetRpe + 1.25);
   const maximalEffort = maxRpe != null && (maxRpe >= 9 || (avgRpe ?? 0) >= targetRpe + TARGET_RPE_TOLERANCE);
 
@@ -420,27 +435,27 @@ function intraWorkoutFatiguePenalty(completedWorking, rpeGap, missedTarget) {
   return Math.min(0.08, penalty);
 }
 
-function bodyweightPendingReps(exercise, targetReps, rpeGap, missedTarget) {
-  if (missedTarget || rpeGap > TARGET_RPE_TOLERANCE) return Math.max(exercise.repMin, targetReps - 1);
-  if (rpeGap < -1) return Math.min(exercise.repMax, targetReps + 1);
+function bodyweightPendingReps(exercise, targetReps, clearlyTooHard, clearlyTooEasy) {
+  if (clearlyTooHard) return Math.max(exercise.repMin, targetReps - 1);
+  if (clearlyTooEasy) return Math.min(exercise.repMax, targetReps + 1);
   return targetReps;
 }
 
-function pendingReason(exercise, pendingSet, lastSet, rpeGap, missedTarget, adjustedWeight, reps) {
+function pendingReason(exercise, pendingSet, lastSet, rpeGap, missedTarget, adjustedWeight, reps, clearlyTooHard, clearlyTooEasy) {
   const targetRpe = Number(exercise.targetRpe) || 8;
   if (missedTarget) {
     return `Reduced the next set because the last set missed the rep floor at RPE ${formatNumber(actualRpe(lastSet))}.`;
   }
-  if (rpeGap > TARGET_RPE_TOLERANCE) {
+  if (clearlyTooHard) {
     return `Reduced the next set because ${formatSetSummary(lastSet, exercise)} landed above target RPE ${formatNumber(targetRpe)}.`;
   }
-  if (rpeGap < -1) {
-    return `Increased the next set because ${formatSetSummary(lastSet, exercise)} was easier than target RPE ${formatNumber(targetRpe)}.`;
+  if (clearlyTooEasy) {
+    return `Increased the next set because ${formatSetSummary(lastSet, exercise)} was well beyond the rep range and clearly below target RPE ${formatNumber(targetRpe)}.`;
   }
   if (adjustedWeight !== pendingSet.weight || reps !== pendingSet.reps) {
     return `Adjusted the next set to stay near target RPE ${formatNumber(targetRpe)} after the previous set.`;
   }
-  return `Holding the next set because the last set matched target RPE ${formatNumber(targetRpe)}.`;
+  return `Holding the next set; one set at target RPE is not enough to increase load mid-exercise.`;
 }
 
 function formatSetSummary(set, exercise) {

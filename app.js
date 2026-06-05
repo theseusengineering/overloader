@@ -31,6 +31,7 @@ import {
   overwriteTemplateFromActive,
   percentageDelta,
   recalculatePendingWorkingSets,
+  removeSetFromSessionExercise,
   rirToRpe,
   replaceSessionExercise,
   rpeToRir,
@@ -53,6 +54,8 @@ let workoutClockTimer = null;
 let cloudStatus = readCloudStatus();
 let cloudSyncTimer = null;
 let cloudSyncMode = "";
+let setSwipe = null;
+let suppressClickUntil = 0;
 const OTHER_LOCATION_VALUE = "__other__";
 const CUSTOM_TAG_VALUE = "__custom_tag__";
 const DEFAULT_CATEGORY_TAGS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Other"];
@@ -105,6 +108,10 @@ function bindGlobalEvents() {
   document.addEventListener("dragover", handleDragOver);
   document.addEventListener("drop", handleDrop);
   document.addEventListener("dragend", handleDragEnd);
+  document.addEventListener("pointerdown", handleSetPointerDown);
+  document.addEventListener("pointermove", handleSetPointerMove);
+  document.addEventListener("pointerup", handleSetPointerEnd);
+  document.addEventListener("pointercancel", handleSetPointerEnd);
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && modal) {
       closeModal();
@@ -302,6 +309,10 @@ function renderSetRow(sessionExercise, exercise, set) {
   const delta = percentageDelta(set.weight, set.previousWeight);
   const deltaText = delta == null ? "" : `${delta >= 0 ? "+" : ""}${formatNumber(delta)}%`;
   const completedClass = set.completed ? "completed" : "pending";
+  const weightInput = setInputDisplay(set, "weight", inputWeightValue(set.weight, exercise), exercise.loadMode === "bodyweight" ? "BW" : "");
+  const repsInput = setInputDisplay(set, "reps", set.reps ?? "", "");
+  const rpeInput = setInputDisplay(set, "rpe", set.rpe ?? "", "RPE");
+  const rirInput = setInputDisplay(set, "rir", set.rir ?? "", "RIR");
   return `
     <div class="set-row ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" title="${escapeAttr(set.suggestionReason ?? "")}">
       <button class="set-badge ${set.type}" data-action="cycle-set-type" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">${escapeHtml(set.label)}</button>
@@ -309,21 +320,30 @@ function renderSetRow(sessionExercise, exercise, set) {
         ${formatPrevious(set, exercise)}
       </button>
       <label class="number-field weight-field">
-        <input ${disabledWeight} type="number" inputmode="decimal" min="0" step="${exercise.increment}" data-field="weight" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${inputWeightValue(set.weight, exercise)}">
+        <input ${disabledWeight} type="number" inputmode="decimal" min="0" step="${exercise.increment}" data-field="weight" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(weightInput.value)}" placeholder="${escapeAttr(weightInput.placeholder)}">
         ${deltaText ? `<sup>${escapeHtml(deltaText)}</sup>` : ""}
       </label>
       <label class="number-field">
-        <input type="number" inputmode="numeric" min="0" step="1" data-field="reps" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${set.reps ?? ""}">
+        <input type="number" inputmode="numeric" min="0" step="1" data-field="reps" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(repsInput.value)}" placeholder="${escapeAttr(repsInput.placeholder)}">
       </label>
       <label class="number-field compact">
-        <input type="number" inputmode="decimal" min="0" max="10" step="0.5" placeholder="RPE" data-field="rpe" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${set.rpe ?? ""}">
+        <input type="number" inputmode="decimal" min="0" max="10" step="0.5" data-field="rpe" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(rpeInput.value)}" placeholder="${escapeAttr(rpeInput.placeholder)}">
       </label>
       <label class="number-field compact">
-        <input type="number" inputmode="decimal" min="0" max="10" step="0.5" placeholder="RIR" data-field="rir" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${set.rir ?? ""}">
+        <input type="number" inputmode="decimal" min="0" max="10" step="0.5" data-field="rir" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(rirInput.value)}" placeholder="${escapeAttr(rirInput.placeholder)}">
       </label>
       <button class="check-button ${set.completed ? "is-complete" : ""}" data-action="toggle-set-complete" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" aria-label="Toggle complete">${icon("check")}</button>
     </div>
   `;
+}
+
+function setInputDisplay(set, field, rawValue, fallbackPlaceholder) {
+  const value = rawValue == null ? "" : String(rawValue);
+  const hasEnteredValue = Boolean(set.completed || set.editedFields?.[field]);
+  return {
+    value: hasEnteredValue ? value : "",
+    placeholder: hasEnteredValue ? fallbackPlaceholder : (value || fallbackPlaceholder)
+  };
 }
 
 function progressionContext(sessionExercise) {
@@ -1094,6 +1114,11 @@ function renderSessionActions() {
 }
 
 async function handleClick(event) {
+  if (Date.now() < suppressClickUntil) {
+    event.preventDefault();
+    event.stopPropagation();
+    return;
+  }
   const actionTarget = event.target.closest("[data-action], [data-view]");
   const backdrop = event.target.closest(".modal-backdrop");
   if (backdrop && !event.target.closest(".modal-sheet")) {
@@ -1154,6 +1179,59 @@ function handleDragEnd() {
   if (modal?.dragRowId) modal.dragRowId = null;
 }
 
+function handleSetPointerDown(event) {
+  if (!state.activeSession || event.button > 0 || event.target.closest("input, select, textarea")) return;
+  const row = event.target.closest(".set-row:not(.table-head)");
+  if (!row) return;
+  setSwipe = {
+    row,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    dx: 0,
+    dy: 0,
+    active: false
+  };
+}
+
+function handleSetPointerMove(event) {
+  if (!setSwipe || event.pointerId !== setSwipe.pointerId) return;
+  const dx = event.clientX - setSwipe.startX;
+  const dy = event.clientY - setSwipe.startY;
+  setSwipe.dx = dx;
+  setSwipe.dy = dy;
+  if (dx >= 0 || Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+  setSwipe.active = true;
+  event.preventDefault();
+  setSwipe.row.setPointerCapture?.(event.pointerId);
+  const offset = Math.max(dx, -96);
+  setSwipe.row.classList.toggle("is-swiping-delete", Math.abs(offset) > 32);
+  setSwipe.row.style.transform = `translateX(${offset}px)`;
+}
+
+function handleSetPointerEnd(event) {
+  if (!setSwipe || event.pointerId !== setSwipe.pointerId) return;
+  const swipe = setSwipe;
+  setSwipe = null;
+  if (swipe.row.hasPointerCapture?.(event.pointerId)) {
+    swipe.row.releasePointerCapture(event.pointerId);
+  }
+  swipe.row.classList.remove("is-swiping-delete");
+  swipe.row.style.transform = "";
+  const shouldDelete = swipe.active && swipe.dx <= -74 && Math.abs(swipe.dx) > Math.abs(swipe.dy) * 1.35;
+  if (!shouldDelete) return;
+  suppressClickUntil = Date.now() + 350;
+  void deleteSessionSet(swipe.row.dataset.sessionExerciseId, swipe.row.dataset.setId);
+}
+
+async function deleteSessionSet(sessionExerciseId, setId) {
+  removeSetFromSessionExercise(state, sessionExerciseId, setId);
+  recalculatePendingWorkingSets(state, sessionExerciseId);
+  await persist();
+  renderToast("Set deleted");
+  render();
+}
+
 async function runAction(action, target) {
   switch (action) {
     case "go-home":
@@ -1207,6 +1285,7 @@ async function runAction(action, target) {
       break;
     case "toggle-set-complete":
       updateSet(target, (set) => {
+        if (!set.completed) materializeSetPlaceholders(set);
         set.completed = !set.completed;
       });
       recalculatePendingWorkingSets(state, target.dataset.sessionExerciseId);
@@ -1629,6 +1708,10 @@ function handleInput(event) {
     updateSet(target, (set, exercise) => {
       const field = target.dataset.field;
       set.touched = true;
+      set.editedFields = {
+        ...(set.editedFields ?? {}),
+        [field]: true
+      };
       if (field === "weight") set.weight = normalizeInputWeight(clampInputValue(target.value, 0), exercise);
       if (field === "reps") set.reps = target.value === "" ? "" : Math.round(clampInputValue(target.value, 0));
       if (field === "rpe") {
@@ -1724,6 +1807,18 @@ function updateSet(target, updater) {
   const set = sessionExercise?.sets.find((entry) => entry.id === target.dataset.setId);
   const exercise = getExercise(state, sessionExercise?.exerciseId);
   if (set && exercise) updater(set, exercise, sessionExercise);
+}
+
+function materializeSetPlaceholders(set) {
+  set.editedFields = {
+    ...(set.editedFields ?? {})
+  };
+  for (const field of ["weight", "reps", "rpe", "rir"]) {
+    if (set[field] !== "" && set[field] != null) {
+      set.editedFields[field] = true;
+    }
+  }
+  set.touched = true;
 }
 
 function restoreInputFocus(selector, cursorPosition = null) {
@@ -2521,7 +2616,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.5", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.6", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
