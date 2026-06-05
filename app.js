@@ -314,25 +314,28 @@ function renderSetRow(sessionExercise, exercise, set) {
   const rpeInput = setInputDisplay(set, "rpe", set.rpe ?? "", "RPE");
   const rirInput = setInputDisplay(set, "rir", set.rir ?? "", "RIR");
   return `
-    <div class="set-row ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" title="${escapeAttr(set.suggestionReason ?? "")}">
-      <button class="set-badge ${set.type}" data-action="cycle-set-type" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">${escapeHtml(set.label)}</button>
-      <button class="previous-cell" data-action="open-exercise-history" data-exercise-id="${exercise.id}">
-        ${formatPrevious(set, exercise)}
-      </button>
-      <label class="number-field weight-field">
-        <input ${disabledWeight} type="number" inputmode="decimal" min="0" step="${exercise.increment}" data-field="weight" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(weightInput.value)}" placeholder="${escapeAttr(weightInput.placeholder)}">
-        ${deltaText ? `<sup>${escapeHtml(deltaText)}</sup>` : ""}
-      </label>
-      <label class="number-field">
-        <input type="number" inputmode="numeric" min="0" step="1" data-field="reps" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(repsInput.value)}" placeholder="${escapeAttr(repsInput.placeholder)}">
-      </label>
-      <label class="number-field compact">
-        <input type="number" inputmode="decimal" min="0" max="10" step="0.5" data-field="rpe" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(rpeInput.value)}" placeholder="${escapeAttr(rpeInput.placeholder)}">
-      </label>
-      <label class="number-field compact">
-        <input type="number" inputmode="decimal" min="0" max="10" step="0.5" data-field="rir" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(rirInput.value)}" placeholder="${escapeAttr(rirInput.placeholder)}">
-      </label>
-      <button class="check-button ${set.completed ? "is-complete" : ""}" data-action="toggle-set-complete" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" aria-label="Toggle complete">${icon("check")}</button>
+    <div class="set-row-shell ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">
+      <div class="swipe-delete-rail" aria-hidden="true">Delete</div>
+      <div class="set-row ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" title="${escapeAttr(set.suggestionReason ?? "")}">
+        <button class="set-badge ${set.type}" data-action="cycle-set-type" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">${escapeHtml(set.label)}</button>
+        <button class="previous-cell" data-action="open-exercise-history" data-exercise-id="${exercise.id}">
+          ${formatPrevious(set, exercise)}
+        </button>
+        <label class="number-field weight-field">
+          <input ${disabledWeight} type="number" inputmode="decimal" min="0" step="${exercise.increment}" data-field="weight" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(weightInput.value)}" placeholder="${escapeAttr(weightInput.placeholder)}">
+          ${deltaText ? `<sup>${escapeHtml(deltaText)}</sup>` : ""}
+        </label>
+        <label class="number-field">
+          <input type="number" inputmode="numeric" min="0" step="1" data-field="reps" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(repsInput.value)}" placeholder="${escapeAttr(repsInput.placeholder)}">
+        </label>
+        <label class="number-field compact">
+          <input type="number" inputmode="decimal" min="0" max="10" step="0.5" data-field="rpe" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(rpeInput.value)}" placeholder="${escapeAttr(rpeInput.placeholder)}">
+        </label>
+        <label class="number-field compact">
+          <input type="number" inputmode="decimal" min="0" max="10" step="0.5" data-field="rir" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(rirInput.value)}" placeholder="${escapeAttr(rirInput.placeholder)}">
+        </label>
+        <button class="check-button ${set.completed ? "is-complete" : ""}" data-action="toggle-set-complete" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" aria-label="Toggle complete">${icon("check")}</button>
+      </div>
     </div>
   `;
 }
@@ -1183,8 +1186,10 @@ function handleSetPointerDown(event) {
   if (!state.activeSession || event.button > 0 || event.target.closest("input, select, textarea")) return;
   const row = event.target.closest(".set-row:not(.table-head)");
   if (!row) return;
+  const shell = row.closest(".set-row-shell");
   setSwipe = {
     row,
+    shell,
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
@@ -1205,7 +1210,8 @@ function handleSetPointerMove(event) {
   event.preventDefault();
   setSwipe.row.setPointerCapture?.(event.pointerId);
   const offset = Math.max(dx, -96);
-  setSwipe.row.classList.toggle("is-swiping-delete", Math.abs(offset) > 32);
+  setSwipe.shell?.classList.toggle("is-swiping-delete", Math.abs(offset) > 24);
+  setSwipe.shell?.classList.toggle("is-delete-armed", Math.abs(offset) >= 74);
   setSwipe.row.style.transform = `translateX(${offset}px)`;
 }
 
@@ -1216,7 +1222,7 @@ function handleSetPointerEnd(event) {
   if (swipe.row.hasPointerCapture?.(event.pointerId)) {
     swipe.row.releasePointerCapture(event.pointerId);
   }
-  swipe.row.classList.remove("is-swiping-delete");
+  swipe.shell?.classList.remove("is-swiping-delete", "is-delete-armed");
   swipe.row.style.transform = "";
   const shouldDelete = swipe.active && swipe.dx <= -74 && Math.abs(swipe.dx) > Math.abs(swipe.dy) * 1.35;
   if (!shouldDelete) return;
@@ -2616,7 +2622,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.6", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.7", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
