@@ -363,7 +363,7 @@ h1 {
 
 .set-row-shell {
   position: relative;
-  overflow: hidden;
+  overflow: visible;
   border-radius: var(--radius);
 }
 
