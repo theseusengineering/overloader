@@ -1,9 +1,9 @@
-const CACHE_NAME = "overloader-v1.3.8";
+const CACHE_NAME = "overloader-v1.3.9";
 const APP_FILES = [
   "./",
   "./index.html",
-  "./styles.css?v=1.3.8",
-  "./app.js?v=1.3.8",
+  "./styles.css?v=1.3.9",
+  "./app.js?v=1.3.9",
   "./data.js",
   "./strong-history.js",
   "./logic.js",

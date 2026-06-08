@@ -1263,6 +1263,7 @@ async function runAction(action, target) {
       modal = null;
       await persist();
       render();
+      window.scrollTo(0, 0);
       break;
     }
     case "finish-workout":
@@ -2622,7 +2623,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.8", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.9", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
