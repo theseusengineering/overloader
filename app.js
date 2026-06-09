@@ -56,7 +56,83 @@ let cloudSyncTimer = null;
 let cloudSyncMode = "";
 let setSwipe = null;
 let sessionReorder = null;
+let sessionReorderScrollFrame = null;
+let sessionReorderScrollY = null;
 let suppressClickUntil = 0;
+
+let activeConfirm = null;
+
+const overLoaderEvents = new Map();
+
+function onOverLoaderEvent(eventName, handler) {
+  if (!overLoaderEvents.has(eventName)) overLoaderEvents.set(eventName, new Set());
+  overLoaderEvents.get(eventName).add(handler);
+  return () => offOverLoaderEvent(eventName, handler);
+}
+
+function offOverLoaderEvent(eventName, handler) {
+  overLoaderEvents.get(eventName)?.delete(handler);
+}
+
+function emitOverLoaderEvent(eventName, detail = {}) {
+  const listeners = overLoaderEvents.get(eventName);
+  if (!listeners?.size) return;
+  for (const handler of [...listeners]) {
+    try {
+      handler(detail);
+    } catch (error) {
+      console.warn(`OverLoader ${eventName} listener failed`, error);
+    }
+  }
+}
+
+function showConfirm(title, message, confirmLabel = "OK", isDanger = false) {
+  return new Promise((resolve) => {
+    activeConfirm = { type: "confirm", title, message, confirmLabel, isDanger, resolve };
+    render();
+  });
+}
+
+function showAlert(title, message) {
+  return new Promise((resolve) => {
+    activeConfirm = { type: "alert", title, message, resolve };
+    render();
+  });
+}
+
+function showPrompt(title, message, defaultValue = "", confirmLabel = "Save") {
+  return new Promise((resolve) => {
+    activeConfirm = { type: "prompt", title, message, value: defaultValue, confirmLabel, resolve };
+    render();
+  });
+}
+
+function renderConfirmDialog() {
+  const isAlert = activeConfirm.type === "alert";
+  const isPrompt = activeConfirm.type === "prompt";
+  return `
+    <div class="modal-overlay">
+      <div class="modal-shell dialog-shell">
+        <div class="modal-header">
+          <h2>${escapeHtml(activeConfirm.title)}</h2>
+        </div>
+        <div class="modal-body">
+          ${activeConfirm.message ? `<p class="dialog-message">${escapeHtml(activeConfirm.message)}</p>` : ""}
+          ${isPrompt ? `<input class="dialog-input" data-field="confirm-prompt" value="${escapeAttr(activeConfirm.value ?? "")}" autofocus>` : ""}
+        </div>
+        <div class="modal-footer dialog-footer">
+          ${isAlert ? `
+            <button class="primary-wide" data-action="confirm-resolve" data-value="true">OK</button>
+          ` : `
+            <button class="secondary-wide" data-action="confirm-resolve" data-value="false">Cancel</button>
+            <button class="${activeConfirm.isDanger ? "danger-wide" : "primary-wide"}" data-action="confirm-resolve" data-value="true">${escapeHtml(activeConfirm.confirmLabel ?? "OK")}</button>
+          `}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 const expandedExerciseContexts = new Set();
 const OTHER_LOCATION_VALUE = "__other__";
 const CUSTOM_TAG_VALUE = "__custom_tag__";
@@ -153,20 +229,52 @@ function render() {
   const previousModalScrollKey = renderedModalScrollKey;
   const previousModalScrollTop = document.querySelector(".modal-body")?.scrollTop ?? 0;
   const previousPageScrollTop = window.scrollY;
-  app.innerHTML = `
-    <main class="phone-frame">
-      ${renderTopBar()}
-      <section class="view-shell">
-        ${renderView()}
-      </section>
-      ${renderBottomNav()}
-    </main>
-    ${modal ? renderModal() : ""}
-    ${toast ? `<div class="toast">${escapeHtml(toast)}</div>` : ""}
-  `;
+
+  // Initialize the app shell only once
+  if (!app.querySelector('.phone-frame')) {
+    app.innerHTML = `
+      <main class="phone-frame">
+        <div id="app-top-bar-slot"></div>
+        <section class="view-shell" id="app-view-slot"></section>
+        <div id="app-bottom-nav-slot"></div>
+      </main>
+      <div id="app-modal-slot"></div>
+      <div id="app-confirm-slot"></div>
+      <div id="app-toast-slot"></div>
+    `;
+  }
+
+  // Update slots independently
+  document.getElementById('app-top-bar-slot').innerHTML = renderTopBar();
+  document.getElementById('app-bottom-nav-slot').innerHTML = renderBottomNav();
+  document.getElementById('app-modal-slot').innerHTML = modal ? renderModal() : "";
+  document.getElementById('app-confirm-slot').innerHTML = activeConfirm ? renderConfirmDialog() : "";
+  document.getElementById('app-toast-slot').innerHTML = toast ? `<div class="toast">${escapeHtml(toast)}</div>` : "";
+
+  const viewSlot = document.getElementById('app-view-slot');
+
+  if (currentView === "workout" && window.OVERLOADER_USE_PREACT_WORKOUT) {
+    if (!state.activeSession) expandedExerciseContexts.clear();
+    // If Preact is handling the workout view, just ensure the root exists.
+    if (!viewSlot.querySelector('#preact-workout-root')) {
+      viewSlot.innerHTML = `<div id="preact-workout-root"></div>`;
+    }
+  } else if (window.OVERLOADER_USE_PREACT_VIEWS) {
+    if (!viewSlot.querySelector('#preact-views-root')) {
+      viewSlot.innerHTML = `<div id="preact-views-root"></div>`;
+    }
+  } else {
+    // Vanilla JS rendering
+    viewSlot.innerHTML = renderView();
+    if (window.OVERLOADER_USE_PREACT_SETROW) {
+      if (window.PreactSetRow?.mountAll) window.PreactSetRow.mountAll();
+    }
+  }
+
   renderedModalScrollKey = modalScrollKey(modal);
   restoreScrollPosition(previousModalScrollKey, previousModalScrollTop, previousPageScrollTop);
   requestAnimationFrame(adjustExerciseTitleSizing);
+  emitOverLoaderEvent("stateChange", { state, currentView, modal, sessionReorder });
 }
 
 function adjustExerciseTitleSizing() {
@@ -421,6 +529,8 @@ function renderSetRow(sessionExercise, exercise, set) {
 window.OverLoaderAPI = window.OverLoaderAPI ?? {};
 Object.assign(window.OverLoaderAPI, {
   getState: () => state,
+  getSessionReorder: () => sessionReorder,
+  isClickSuppressed: () => suppressClickUntil > Date.now(),
   persist: async () => await persist(),
   runAction: async (action, dataset) => {
     // runAction expects an element-like object with .dataset
@@ -430,7 +540,32 @@ Object.assign(window.OverLoaderAPI, {
     await deleteSessionSet(sessionExerciseId, setId);
   },
   closeAllRevealedRows: () => closeAllRevealedRows(),
-  renderApp: () => render()
+  renderApp: () => render(),
+  on: (eventName, handler) => onOverLoaderEvent(eventName, handler),
+  off: (eventName, handler) => offOverLoaderEvent(eventName, handler),
+  commitSetField: async (sessionExerciseId, setId, field, value) => {
+    const result = updateSetField(sessionExerciseId, setId, field, value);
+    await persist();
+    if (result.editedCompletedSet) render();
+    else emitOverLoaderEvent("stateChange", { state, currentView, modal, sessionReorder });
+    return result;
+  },
+  icon: (name) => icon(name),
+  formatDate: (date) => formatDate(date),
+  formatElapsed: (date) => formatElapsed(date),
+  formatDateTime: (date) => formatDateTime(date),
+  formatSyncDate: (date) => formatSyncDate(date),
+  formatNumber: (value) => formatNumber(value),
+  progressionContext: (sessionExercise) => progressionContext(sessionExercise),
+  getCloudStatus: () => {
+    cloudStatus = readCloudStatus();
+    return cloudStatus;
+  },
+  getCloudSyncMode: () => cloudSyncMode,
+  isLocalDevelopmentHost: () => isLocalDevelopmentHost(),
+  getExerciseFilter: () => exerciseFilter,
+  getCategoryFilter: () => categoryFilter,
+  getCurrentView: () => currentView
 });
 
 function setInputDisplay(set, field, rawValue, fallbackPlaceholder) {
@@ -1269,6 +1404,7 @@ function handleSessionReorderPointerDown(event) {
     sourceId: sessionExerciseId,
     startX: event.clientX,
     startY: event.clientY,
+    sourceElement: title,
     timer: window.setTimeout(() => activateSessionReorder(event.pointerId), SESSION_REORDER_HOLD_MS)
   };
 }
@@ -1305,7 +1441,12 @@ async function handleSessionReorderPointerEnd(event) {
   if (event.type !== "mouseup" && event.pointerId !== sessionReorder.pointerId) return;
   const wasActive = sessionReorder.active;
   const changed = sessionReorder.changed;
+  const sourceElement = sessionReorder.sourceElement;
+  if (sourceElement?.hasPointerCapture?.(event.pointerId)) {
+    sourceElement.releasePointerCapture(event.pointerId);
+  }
   clearSessionReorderTimer();
+  clearSessionReorderAutoScroll();
   sessionReorder = null;
   if (!wasActive) return;
   event.preventDefault();
@@ -1322,6 +1463,7 @@ function activateSessionReorder(pointerId) {
   if (!sessionReorder || sessionReorder.pointerId !== pointerId || !state.activeSession) return;
   sessionReorder.active = true;
   sessionReorder.changed = false;
+  sessionReorder.sourceElement?.setPointerCapture?.(pointerId);
   setSwipe = null;
   suppressClickUntil = Date.now() + 700;
   render();
@@ -1335,12 +1477,32 @@ function clearSessionReorderTimer() {
 }
 
 function autoScrollSessionReorder(clientY) {
+  sessionReorderScrollY = clientY;
+  if (sessionReorderScrollFrame != null) return;
+  sessionReorderScrollFrame = requestAnimationFrame(() => {
+    sessionReorderScrollFrame = null;
+    const y = sessionReorderScrollY;
+    sessionReorderScrollY = null;
+    if (y == null || !sessionReorder?.active) return;
+    scrollSessionReorderAt(y);
+  });
+}
+
+function scrollSessionReorderAt(clientY) {
   const edge = 78;
   if (clientY < edge) {
     window.scrollBy(0, -12);
   } else if (clientY > window.innerHeight - edge) {
     window.scrollBy(0, 12);
   }
+}
+
+function clearSessionReorderAutoScroll() {
+  if (sessionReorderScrollFrame != null) {
+    cancelAnimationFrame(sessionReorderScrollFrame);
+    sessionReorderScrollFrame = null;
+  }
+  sessionReorderScrollY = null;
 }
 
 function handleSetPointerDown(event) {
@@ -1362,7 +1524,8 @@ function handleSetPointerDown(event) {
     railWidth,
     dx: 0,
     dy: 0,
-    active: false
+    active: false,
+    axis: null
   };
 }
 
@@ -1372,7 +1535,16 @@ function handleSetPointerMove(event) {
   const dy = event.clientY - setSwipe.startY;
   setSwipe.dx = dx;
   setSwipe.dy = dy;
-  if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+  if (!setSwipe.axis) {
+    if (Math.hypot(dx, dy) < 10) return;
+    if (Math.abs(dy) > Math.abs(dx) * 1.1) {
+      cancelSetSwipe(event);
+      return;
+    }
+    if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+    setSwipe.axis = "horizontal";
+    setSwipe.row.setPointerCapture?.(event.pointerId);
+  }
   setSwipe.active = true;
   event.preventDefault();
   const maxOffset = setSwipe.railWidth;
@@ -1406,6 +1578,19 @@ function handleSetPointerEnd(event) {
   swipe.row.style.transform = "";
 }
 
+function cancelSetSwipe(event) {
+  const swipe = setSwipe;
+  if (!swipe) return;
+  setSwipe = null;
+  if (swipe.row.hasPointerCapture?.(swipe.pointerId)) {
+    swipe.row.releasePointerCapture(swipe.pointerId);
+  }
+  swipe.shell?.classList.remove("is-swiping-delete", "is-delete-armed");
+  if (!swipe.shell?.classList.contains("is-revealed")) {
+    swipe.row.style.transform = "";
+  }
+}
+
 async function deleteSessionSet(sessionExerciseId, setId) {
   removeSetFromSessionExercise(state, sessionExerciseId, setId);
   recalculatePendingWorkingSets(state, sessionExerciseId);
@@ -1416,21 +1601,30 @@ async function deleteSessionSet(sessionExerciseId, setId) {
 
 async function runAction(action, target) {
   switch (action) {
+    case "confirm-resolve":
+      if (activeConfirm && activeConfirm.resolve) {
+        const confirmed = target.dataset.value === "true";
+        const promptValue = document.querySelector("[data-field='confirm-prompt']")?.value ?? activeConfirm.value ?? "";
+        activeConfirm.resolve(activeConfirm.type === "prompt" ? (confirmed ? promptValue : null) : confirmed);
+        activeConfirm = null;
+        render();
+      }
+      break;
     case "go-home":
-      if (!confirmDiscardModalChanges()) return;
+      if (!await confirmDiscardModalChanges()) return;
       currentView = "workout";
       modal = null;
       render();
       break;
     case "start-template":
-      if (state.activeSession && !confirm("Replace the active workout?")) return;
+      if (state.activeSession && !await showConfirm("Replace Workout?", "Replace the active workout?", "Replace", true)) return;
       openStartLocationModal(target.dataset.templateId);
       render();
       break;
     case "start-template-confirm": {
       const location = selectedWorkoutLocation();
       if (!location) {
-        alert("Choose a workout location first.");
+        await showAlert("Choose Location", "Choose a workout location first.");
         return;
       }
       state.activeSession = createSessionFromTemplate(state, modal.templateId, location);
@@ -1462,7 +1656,7 @@ async function runAction(action, target) {
       await finishWorkout();
       break;
     case "cancel-workout":
-      if (!confirm("Cancel this workout? Unsaved set rows will be lost.")) return;
+      if (!await showConfirm("Cancel Workout?", "Cancel this workout? Unsaved set rows will be lost.", "Cancel Workout", true)) return;
       state.activeSession = null;
       expandedExerciseContexts.clear();
       await persist();
@@ -1522,7 +1716,8 @@ async function runAction(action, target) {
     case "select-exercise":
       if (modal?.mode === "replace") {
         const current = state.activeSession?.exercises.find((entry) => entry.id === modal.sessionExerciseId);
-        if (sessionExerciseHasEnteredWork(current) && !confirm("Replace this exercise? Completed or edited rows on it will be discarded.")) return;
+        if (sessionExerciseHasEnteredWork(current)
+          && !await showConfirm("Replace Exercise?", "Completed or edited rows on it will be discarded.", "Replace", true)) return;
         replaceSessionExercise(state, modal.sessionExerciseId, target.dataset.exerciseId);
       } else if (modal?.mode === "template-add") {
         addExerciseToTemplateDraft(modal, target.dataset.exerciseId);
@@ -1559,7 +1754,7 @@ async function runAction(action, target) {
       render();
       break;
     case "remove-session-exercise":
-      if (!confirm("Remove this exercise from the current workout?")) return;
+      if (!await showConfirm("Remove Exercise?", "Remove this exercise from the current workout?", "Remove", true)) return;
       state.activeSession.exercises = state.activeSession.exercises.filter((entry) => entry.id !== target.dataset.sessionExerciseId);
       state.activeSession.templateDirty = true;
       modal = null;
@@ -1577,9 +1772,9 @@ async function runAction(action, target) {
       await deleteSessionSet(target.dataset.sessionExerciseId, target.dataset.setId);
       break;
     case "add-note": {
-      const note = prompt("Exercise note");
+      const entry = state.activeSession.exercises.find((item) => item.id === target.dataset.sessionExerciseId);
+      const note = await showPrompt("Exercise Note", "", entry?.note ?? "");
       if (note != null) {
-        const entry = state.activeSession.exercises.find((item) => item.id === target.dataset.sessionExerciseId);
         if (entry) entry.note = note.trim();
       }
       modal = null;
@@ -1604,14 +1799,14 @@ async function runAction(action, target) {
       }
       break;
     case "delete-workout-history":
-      if (!confirm("Delete this workout from history? This removes every exercise log in it.")) return;
+      if (!await showConfirm("Delete Workout?", "This removes every exercise log in it.", "Delete", true)) return;
       deleteWorkoutHistory(target.dataset.sessionId);
       await persist();
       renderToast("Workout deleted");
       render();
       break;
     case "delete-workout-history-from-editor":
-      if (!confirm("Delete this workout from history? This removes every exercise log in it.")) return;
+      if (!await showConfirm("Delete Workout?", "This removes every exercise log in it.", "Delete", true)) return;
       deleteWorkoutHistory(target.dataset.sessionId);
       modal = null;
       await persist();
@@ -1734,7 +1929,7 @@ async function runAction(action, target) {
       render();
       break;
     case "remove-template-row":
-      if (!confirm("Remove this exercise from the template?")) return;
+      if (!await showConfirm("Remove Exercise?", "Remove this exercise from the template?", "Remove", true)) return;
       removeTemplateRow(target.dataset.templateId, target.dataset.rowId);
       render();
       break;
@@ -1757,11 +1952,11 @@ async function runAction(action, target) {
         renderToast("Cloud settings saved");
         render();
       } catch (error) {
-        alert(`Cloud settings not saved: ${error.message}`);
+        await showAlert("Cloud Settings Not Saved", error.message);
       }
       break;
     case "clear-cloud-config":
-      if (!confirm("Clear cloud sync settings from this device?")) return;
+      if (!await showConfirm("Clear Cloud Settings?", "Clear cloud sync settings from this device?", "Clear", true)) return;
       clearCloudConfig();
       cloudStatus = readCloudStatus();
       modal = null;
@@ -1809,7 +2004,7 @@ async function runAction(action, target) {
       render();
       break;
     case "reset-seed":
-      if (!confirm("Reload seed data and clear local edits/history?")) return;
+      if (!await showConfirm("Reload Seed Data?", "Reload seed data and clear local edits/history?", "Reload", true)) return;
       localStorage.removeItem("overloader-state");
       state = await replaceState((await import("./data.js")).createInitialState());
       renderToast("Seed data reloaded");
@@ -1829,7 +2024,7 @@ async function finishWorkout() {
     (count, exercise) => count + exercise.sets.filter((set) => set.completed).length,
     0
   );
-  if (!completedSets && !confirm("No sets are checked complete, so no exercise history will be saved. Finish and discard this workout?")) return;
+  if (!completedSets && !await showConfirm("Discard Workout?", "No sets are checked complete, so no exercise history will be saved. Finish and discard this workout?", "Discard", true)) return;
   const result = finishActiveSession(state);
   state = result.state;
   expandedExerciseContexts.clear();
@@ -1881,27 +2076,7 @@ function handleInput(event) {
   if (markModalFormDirty(target)) return;
 
   if (target.dataset.field && target.dataset.setId) {
-    let editedCompletedSet = false;
-    updateSet(target, (set, exercise) => {
-      const field = target.dataset.field;
-      set.touched = true;
-      set.editedFields = {
-        ...(set.editedFields ?? {}),
-        [field]: true
-      };
-      if (field === "weight") set.weight = normalizeInputWeight(clampInputValue(target.value, 0), exercise);
-      if (field === "reps") set.reps = target.value === "" ? "" : Math.round(clampInputValue(target.value, 0));
-      if (field === "rpe") {
-        set.rpe = target.value === "" ? "" : clampInputValue(target.value, 0, 10);
-        set.rir = rpeToRir(set.rpe);
-      }
-      if (field === "rir") {
-        set.rir = target.value === "" ? "" : clampInputValue(target.value, 0, 10);
-        set.rpe = rirToRpe(set.rir);
-      }
-      editedCompletedSet = Boolean(set.completed);
-    });
-    recalculatePendingWorkingSets(state, target.dataset.sessionExerciseId);
+    const { editedCompletedSet } = updateSetField(target.dataset.sessionExerciseId, target.dataset.setId, target.dataset.field, target.value);
     void persist();
     if (editedCompletedSet) {
       render();
@@ -1921,6 +2096,30 @@ function handleInput(event) {
       saveState(state);
     }
   }
+}
+
+function updateSetField(sessionExerciseId, setId, field, rawValue) {
+  let editedCompletedSet = false;
+  updateSet({ dataset: { sessionExerciseId, setId } }, (set, exercise) => {
+    set.touched = true;
+    set.editedFields = {
+      ...(set.editedFields ?? {}),
+      [field]: true
+    };
+    if (field === "weight") set.weight = normalizeInputWeight(clampInputValue(rawValue, 0), exercise);
+    if (field === "reps") set.reps = rawValue === "" ? "" : Math.round(clampInputValue(rawValue, 0));
+    if (field === "rpe") {
+      set.rpe = rawValue === "" ? "" : clampInputValue(rawValue, 0, 10);
+      set.rir = rpeToRir(set.rpe);
+    }
+    if (field === "rir") {
+      set.rir = rawValue === "" ? "" : clampInputValue(rawValue, 0, 10);
+      set.rpe = rirToRpe(set.rir);
+    }
+    editedCompletedSet = Boolean(set.completed);
+  });
+  recalculatePendingWorkingSets(state, sessionExerciseId);
+  return { editedCompletedSet };
 }
 
 async function handleChange(event) {
@@ -1964,7 +2163,7 @@ async function handleChange(event) {
   if (target.dataset.action === "import-backup") {
     const file = target.files?.[0];
     if (!file) return;
-    if (!confirm("Import this backup and replace local OverLoader data?")) {
+    if (!await showConfirm("Import Backup?", "Import this backup and replace local OverLoader data?", "Import", true)) {
       target.value = "";
       return;
     }
@@ -1974,7 +2173,7 @@ async function handleChange(event) {
       renderToast("Backup imported");
       render();
     } catch (error) {
-      alert(`Import failed: ${error.message}`);
+      await showAlert("Import Failed", error.message);
     }
   }
 }
@@ -2449,16 +2648,16 @@ function syncTemplateDraftFromForm() {
   modal.draft.location = normalizeLocationName(data.get("location") || modal.draft.location);
 }
 
-function confirmDiscardModalChanges() {
+async function confirmDiscardModalChanges() {
   if (!modal?.dirty) return true;
-  if (modal.type === "template-editor") return confirm("Discard unsaved template changes?");
-  if (modal.type === "exercise-picker" && (modal.mode === "template-add" || modal.mode === "template-replace")) return confirm("Discard unsaved template changes?");
-  if (modal.type === "exercise-settings") return confirm("Discard unsaved exercise changes?");
-  if (modal.type === "workout-history-editor") return confirm("Discard unsaved workout changes?");
+  if (modal.type === "template-editor") return await showConfirm("Discard changes?", "Discard unsaved template changes?", "Discard", true);
+  if (modal.type === "exercise-picker" && (modal.mode === "template-add" || modal.mode === "template-replace")) return await showConfirm("Discard changes?", "Discard unsaved template changes?", "Discard", true);
+  if (modal.type === "exercise-settings") return await showConfirm("Discard changes?", "Discard unsaved exercise changes?", "Discard", true);
+  if (modal.type === "workout-history-editor") return await showConfirm("Discard changes?", "Discard unsaved workout changes?", "Discard", true);
   return true;
 }
 
-function closeModal() {
+async function closeModal() {
   if (modal?.type === "exercise-picker" && (modal.mode === "template-add" || modal.mode === "template-replace") && modal.draft) {
     modal = {
       type: "template-editor",
@@ -2473,7 +2672,7 @@ function closeModal() {
     return;
   }
 
-  if (!confirmDiscardModalChanges()) return;
+  if (!await confirmDiscardModalChanges()) return;
   modal = null;
   render();
 }
@@ -2503,10 +2702,10 @@ async function runCloudSync(mode) {
       return;
     }
     if (state.activeSession && mode !== "push") {
-      alert("Finish or cancel the active workout before pulling cloud data.");
+      await showAlert("Active Workout", "Finish or cancel the active workout before pulling cloud data.");
       return;
     }
-    if (mode === "pull" && !confirm("Pull cloud data and replace local OverLoader data on this device?")) {
+    if (mode === "pull" && !await showConfirm("Pull Data?", "Pull cloud data and replace local OverLoader data on this device?", "Pull", true)) {
       return;
     }
 
@@ -2528,7 +2727,7 @@ async function runCloudSync(mode) {
     renderToast(cloudSyncMessage(result));
   } catch (error) {
     cloudStatus = readCloudStatus();
-    alert(`Cloud sync failed: ${error.message}`);
+    await showAlert("Sync Error", `Cloud sync failed: ${error.message}`);
   } finally {
     cloudSyncMode = "";
     render();
