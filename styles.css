@@ -451,10 +451,15 @@ h1 {
   content: "";
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: 0;
   border-radius: inherit;
   background: rgba(49, 209, 123, 0.2);
   pointer-events: none;
+}
+
+.set-row.completed > * {
+  position: relative;
+  z-index: 1;
 }
 
 .set-badge {
