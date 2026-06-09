@@ -55,11 +55,13 @@ let cloudStatus = readCloudStatus();
 let cloudSyncTimer = null;
 let cloudSyncMode = "";
 let setSwipe = null;
+let sessionReorder = null;
 let suppressClickUntil = 0;
 const OTHER_LOCATION_VALUE = "__other__";
 const CUSTOM_TAG_VALUE = "__custom_tag__";
 const DEFAULT_CATEGORY_TAGS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Other"];
 const DEFAULT_EQUIPMENT_TAGS = ["machine", "plate-loaded", "cable", "dumbbell", "barbell", "bodyweight", "assisted"];
+const SESSION_REORDER_HOLD_MS = 460;
 
 canonicalizeAppUrl();
 renderBoot("Loading OverLoader");
@@ -108,6 +110,11 @@ function bindGlobalEvents() {
   document.addEventListener("dragover", handleDragOver);
   document.addEventListener("drop", handleDrop);
   document.addEventListener("dragend", handleDragEnd);
+  document.addEventListener("pointerdown", handleSessionReorderPointerDown);
+  document.addEventListener("pointermove", handleSessionReorderPointerMove);
+  document.addEventListener("pointerup", handleSessionReorderPointerEnd);
+  document.addEventListener("pointercancel", handleSessionReorderPointerEnd);
+  document.addEventListener("mouseup", handleSessionReorderPointerEnd);
   document.addEventListener("pointerdown", handleSetPointerDown);
   document.addEventListener("pointermove", handleSetPointerMove);
   document.addEventListener("pointerup", handleSetPointerEnd);
@@ -253,12 +260,30 @@ function renderWorkoutView() {
       </div>
       <button class="small-blue-button" data-action="open-template-session-actions">${icon("more")}</button>
     </div>
+    ${sessionReorder?.active ? renderSessionExerciseReorder() : `
     <div class="exercise-stack">
       ${state.activeSession.exercises.map(renderSessionExercise).join("")}
     </div>
     <div class="session-actions">
       <button class="primary-wide" data-action="open-add-exercise">${icon("plus")} Add Exercises</button>
       <button class="danger-wide" data-action="cancel-workout">Cancel Workout</button>
+    </div>
+    `}
+  `;
+}
+
+function renderSessionExerciseReorder() {
+  return `
+    <div class="session-reorder-list">
+      ${state.activeSession.exercises.map((sessionExercise) => {
+        const exercise = getExercise(state, sessionExercise.exerciseId);
+        return `
+          <div class="session-reorder-row ${sessionReorder.sourceId === sessionExercise.id ? "is-dragging" : ""}" data-session-reorder-id="${sessionExercise.id}">
+            <span class="drag-handle">${icon("grip")}</span>
+            <strong>${escapeHtml(exercise ? formatExerciseDisplayName(exercise) : "Unknown")}</strong>
+          </div>
+        `;
+      }).join("")}
     </div>
   `;
 }
@@ -272,7 +297,7 @@ function renderSessionExercise(sessionExercise) {
   return `
     <article class="session-exercise" data-session-exercise-id="${sessionExercise.id}">
       <div class="exercise-title-row">
-        <button class="exercise-title" data-action="open-exercise-history" data-exercise-id="${exercise.id}">
+        <button class="exercise-title" data-action="open-exercise-history" data-exercise-id="${exercise.id}" data-session-exercise-id="${sessionExercise.id}">
           ${escapeHtml(formatExerciseDisplayName(exercise))}
           ${exercise.needsReview ? `<span class="review-pill">confirm</span>` : ""}
         </button>
@@ -1182,8 +1207,95 @@ function handleDragEnd() {
   if (modal?.dragRowId) modal.dragRowId = null;
 }
 
+function handleSessionReorderPointerDown(event) {
+  if (!state.activeSession || currentView !== "workout" || modal || event.button > 0) return;
+  const title = event.target.closest(".exercise-title");
+  const sessionExerciseId = title?.dataset.sessionExerciseId;
+  if (!title || !sessionExerciseId) return;
+  clearSessionReorderTimer();
+  sessionReorder = {
+    active: false,
+    changed: false,
+    pointerId: event.pointerId,
+    sourceId: sessionExerciseId,
+    startX: event.clientX,
+    startY: event.clientY,
+    timer: window.setTimeout(() => activateSessionReorder(event.pointerId), SESSION_REORDER_HOLD_MS)
+  };
+}
+
+function handleSessionReorderPointerMove(event) {
+  if (!sessionReorder || event.pointerId !== sessionReorder.pointerId) return;
+  const dx = event.clientX - sessionReorder.startX;
+  const dy = event.clientY - sessionReorder.startY;
+  if (!sessionReorder.active) {
+    if (Math.hypot(dx, dy) > 12) {
+      clearSessionReorderTimer();
+      sessionReorder = null;
+    }
+    return;
+  }
+
+  event.preventDefault();
+  const targetRow = document
+    .elementFromPoint(event.clientX, event.clientY)
+    ?.closest("[data-session-reorder-id]");
+  if (targetRow) {
+    const placeAfter = event.clientY > targetRow.getBoundingClientRect().top + targetRow.offsetHeight / 2;
+    const changed = dropSessionReorderExercise(sessionReorder.sourceId, targetRow.dataset.sessionReorderId, placeAfter);
+    if (changed) {
+      sessionReorder.changed = true;
+      render();
+    }
+  }
+  autoScrollSessionReorder(event.clientY);
+}
+
+async function handleSessionReorderPointerEnd(event) {
+  if (!sessionReorder) return;
+  if (event.type !== "mouseup" && event.pointerId !== sessionReorder.pointerId) return;
+  const wasActive = sessionReorder.active;
+  const changed = sessionReorder.changed;
+  clearSessionReorderTimer();
+  sessionReorder = null;
+  if (!wasActive) return;
+  event.preventDefault();
+  suppressClickUntil = Date.now() + 450;
+  if (changed && state.activeSession) {
+    state.activeSession.templateDirty = true;
+    await persist();
+    renderToast("Exercise order updated");
+  }
+  render();
+}
+
+function activateSessionReorder(pointerId) {
+  if (!sessionReorder || sessionReorder.pointerId !== pointerId || !state.activeSession) return;
+  sessionReorder.active = true;
+  sessionReorder.changed = false;
+  setSwipe = null;
+  suppressClickUntil = Date.now() + 700;
+  render();
+}
+
+function clearSessionReorderTimer() {
+  if (sessionReorder?.timer) {
+    window.clearTimeout(sessionReorder.timer);
+    sessionReorder.timer = null;
+  }
+}
+
+function autoScrollSessionReorder(clientY) {
+  const edge = 78;
+  if (clientY < edge) {
+    window.scrollBy(0, -12);
+  } else if (clientY > window.innerHeight - edge) {
+    window.scrollBy(0, 12);
+  }
+}
+
 function handleSetPointerDown(event) {
-  if (!state.activeSession || event.button > 0 || event.target.closest("input, select, textarea")) return;
+  if (sessionReorder?.active || !state.activeSession || event.button > 0 || event.target.closest("input, select, textarea")) return;
   const row = event.target.closest(".set-row:not(.table-head)");
   if (!row) return;
   const shell = row.closest(".set-row-shell");
@@ -2199,6 +2311,19 @@ function dropTemplateReorderRow(sourceRowId, targetRowId, placeAfter) {
   modal.reorderIds = ordered;
 }
 
+function dropSessionReorderExercise(sourceId, targetId, placeAfter) {
+  const exercises = state.activeSession?.exercises;
+  if (!exercises || sourceId === targetId) return false;
+  const before = exercises.map((entry) => entry.id).join("|");
+  const sourceIndex = exercises.findIndex((entry) => entry.id === sourceId);
+  const targetIndex = exercises.findIndex((entry) => entry.id === targetId);
+  if (sourceIndex < 0 || targetIndex < 0) return false;
+  const [source] = exercises.splice(sourceIndex, 1);
+  const adjustedTargetIndex = exercises.findIndex((entry) => entry.id === targetId);
+  exercises.splice(adjustedTargetIndex + (placeAfter ? 1 : 0), 0, source);
+  return exercises.map((entry) => entry.id).join("|") !== before;
+}
+
 function replaceExerciseInTemplateDraft(templateModal, rowId, exerciseId) {
   const template = templateModal.draft;
   const exercise = getExercise(state, exerciseId);
@@ -2623,7 +2748,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.3.9", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.4.0", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);
