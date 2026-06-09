@@ -14,6 +14,15 @@ Templates/
 UI references/
 screenshots/
 
+# Non-essential scripts and reports
+scripts/
+!scripts/repo_sync_server.py
+Reports/
+
+# Markdown files (keeping important docs)
+*.md
+!README.md
+
 # Raw/imported personal exports and dated backup downloads
 historical_strong_workouts.csv
 overloader-*.json
