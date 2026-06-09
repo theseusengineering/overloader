@@ -443,7 +443,18 @@ h1 {
 
 .set-row.completed {
   opacity: 1;
+  box-shadow: inset 0 0 0 1px rgba(49, 209, 123, 0.24);
   animation: set-complete var(--speed-med) var(--ease-out);
+}
+
+.set-row.completed::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: inherit;
+  background: rgba(49, 209, 123, 0.2);
+  pointer-events: none;
 }
 
 .set-badge {
