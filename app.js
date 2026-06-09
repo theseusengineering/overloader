@@ -57,6 +57,7 @@ let cloudSyncMode = "";
 let setSwipe = null;
 let sessionReorder = null;
 let suppressClickUntil = 0;
+const expandedExerciseContexts = new Set();
 const OTHER_LOCATION_VALUE = "__other__";
 const CUSTOM_TAG_VALUE = "__custom_tag__";
 const DEFAULT_CATEGORY_TAGS = ["Chest", "Back", "Shoulders", "Arms", "Legs", "Core", "Other"];
@@ -165,6 +166,37 @@ function render() {
   `;
   renderedModalScrollKey = modalScrollKey(modal);
   restoreScrollPosition(previousModalScrollKey, previousModalScrollTop, previousPageScrollTop);
+  requestAnimationFrame(adjustExerciseTitleSizing);
+}
+
+function adjustExerciseTitleSizing() {
+  // Wait for fonts to be ready before measuring to avoid flash-of-incorrect-size
+  try {
+    document.fonts?.ready?.then(() => {
+      const titles = document.querySelectorAll(".exercise-title");
+      for (const el of titles) {
+        // Reset any previous transforms
+        el.style.transform = "";
+        el.style.transformOrigin = "left center";
+        // Ensure the element is measured inline-block for accurate widths
+        const prevDisplay = el.style.display;
+        if (!prevDisplay) el.style.display = 'inline-block';
+        const available = el.clientWidth - 4; // small guard
+        const needed = el.scrollWidth;
+        if (needed > available && needed > 0) {
+          const scale = available / needed;
+          // Do not scale below 0.6 to preserve legibility
+          const minScale = 0.6;
+          const applied = Math.max(minScale, Math.min(1, scale));
+          el.style.transform = `scale(${applied})`;
+        }
+        // leave display as inline-block only if it was set here
+        if (!prevDisplay) el.style.display = '';
+      }
+    }).catch((e) => console.warn('fonts.ready failed', e));
+  } catch (e) {
+    console.warn("adjustExerciseTitleSizing error", e);
+  }
 }
 
 function modalScrollKey(activeModal) {
@@ -203,14 +235,14 @@ function restoreScrollPosition(previousModalScrollKey, previousModalScrollTop, p
 function renderTopBar() {
   const active = state.activeSession;
   const title = active ? active.templateName : "OverLoader";
-  const subtitle = active ? formatElapsed(active.startedAt) : `${state.exercises.length} exercises`;
+  const subtitle = active
+    ? `<span class="top-subtitle"><span>${escapeHtml(formatDate(active.startedAt))}</span><span aria-hidden="true"> - </span><span data-role="workout-clock">${escapeHtml(formatElapsed(active.startedAt))}</span></span>`
+    : escapeHtml(`${state.exercises.length} exercises`);
   return `
     <header class="top-bar">
-      <button class="icon-button" data-action="go-home" aria-label="Workout home">${icon("rotate")}</button>
       <div class="top-title">
-        <div class="grabber"></div>
         <strong>${escapeHtml(title)}</strong>
-        <span ${active ? "data-role=\"workout-clock\"" : ""}>${escapeHtml(subtitle)}</span>
+        <span>${subtitle}</span>
       </div>
       ${active
         ? `<button class="finish-button" data-action="finish-workout">Finish</button>`
@@ -238,6 +270,7 @@ function renderView() {
 
 function renderWorkoutView() {
   if (!state.activeSession) {
+    expandedExerciseContexts.clear();
     return `
       <div class="start-panel">
         <div class="section-heading">
@@ -253,13 +286,6 @@ function renderWorkoutView() {
   }
 
   return `
-    <div class="session-meta">
-      <div>
-        <h1>${escapeHtml(state.activeSession.templateName)}</h1>
-        <span>${formatDate(state.activeSession.startedAt)}</span>
-      </div>
-      <button class="small-blue-button" data-action="open-template-session-actions">${icon("more")}</button>
-    </div>
     ${sessionReorder?.active ? renderSessionExerciseReorder() : `
     <div class="exercise-stack">
       ${state.activeSession.exercises.map(renderSessionExercise).join("")}
@@ -294,21 +320,36 @@ function renderSessionExercise(sessionExercise) {
   const kgLabel = exercise?.loadMode === "assisted" ? "-kg" : "kg";
   const weightHeader = exercise?.loadMode === "bodyweight" ? "Load" : kgLabel;
   const reason = progressionContext(sessionExercise);
+  const hasContext = Boolean(previous || reason);
+  const contextExpanded = expandedExerciseContexts.has(sessionExercise.id);
+  const displayName = exercise ? formatExerciseDisplayName(exercise) : "Unknown";
+  const charCount = displayName.length;
   return `
     <article class="session-exercise" data-session-exercise-id="${sessionExercise.id}">
       <div class="exercise-title-row">
-        <button class="exercise-title" data-action="open-exercise-history" data-exercise-id="${exercise.id}" data-session-exercise-id="${sessionExercise.id}">
-          ${escapeHtml(formatExerciseDisplayName(exercise))}
+        <button class="exercise-title" style="--char-count: ${charCount}" data-action="open-exercise-history" data-exercise-id="${exercise.id}" data-session-exercise-id="${sessionExercise.id}">
+          ${escapeHtml(displayName)}
           ${exercise.needsReview ? `<span class="review-pill">confirm</span>` : ""}
         </button>
         <div class="exercise-tools">
-          <button class="mini-icon" data-action="open-focus" data-session-exercise-id="${sessionExercise.id}" aria-label="Focus metric">${icon("chart")}</button>
           <button class="mini-icon" data-action="open-exercise-menu" data-session-exercise-id="${sessionExercise.id}" aria-label="Exercise menu">${icon("more")}</button>
         </div>
       </div>
       ${sessionExercise.note ? `<div class="sticky-note">${escapeHtml(sessionExercise.note)}</div>` : ""}
-      ${previous ? `<div class="previous-context">${escapeHtml(previous.workoutName)} · ${formatDate(previous.performedAt)}</div>` : ""}
-      ${reason ? `<div class="progression-context">${escapeHtml(reason)}</div>` : ""}
+      ${hasContext ? `
+        <button
+          class="context-toggle"
+          data-action="toggle-exercise-context"
+          data-session-exercise-id="${sessionExercise.id}"
+          aria-expanded="${contextExpanded ? "true" : "false"}"
+        >${contextExpanded ? "Hide" : "Show"} Load Reasoning and History</button>
+        ${contextExpanded ? `
+          <div class="exercise-context-panel">
+            ${previous ? `<div class="previous-context">${escapeHtml(previous.workoutName)} · ${formatDate(previous.performedAt)}</div>` : ""}
+            ${reason ? `<div class="progression-context">${escapeHtml(reason)}</div>` : ""}
+          </div>
+        ` : ""}
+      ` : ""}
       <div class="set-table">
         <div class="set-row table-head">
           <span>Set</span>
@@ -330,9 +371,18 @@ function renderSessionExercise(sessionExercise) {
 }
 
 function renderSetRow(sessionExercise, exercise, set) {
+  // If Preact set-row replacement is enabled, render a mounting container.
+  if (window?.OVERLOADER_USE_PREACT_SETROW) {
+    return `
+      <div class="set-row-shell" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">
+        <div class="set-row-react" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}"></div>
+      </div>
+    `;
+  }
   const disabledWeight = exercise.loadMode === "bodyweight" ? "disabled" : "";
   const delta = percentageDelta(set.weight, set.previousWeight);
   const deltaText = delta == null ? "" : `${delta >= 0 ? "+" : ""}${formatNumber(delta)}%`;
+  const deltaClass = delta != null && delta < 0 ? "is-negative" : "is-positive";
   const completedClass = set.completed ? "completed" : "pending";
   const weightInput = setInputDisplay(set, "weight", inputWeightValue(set.weight, exercise), exercise.loadMode === "bodyweight" ? "BW" : "");
   const repsInput = setInputDisplay(set, "reps", set.reps ?? "", "");
@@ -340,7 +390,9 @@ function renderSetRow(sessionExercise, exercise, set) {
   const rirInput = setInputDisplay(set, "rir", set.rir ?? "", "RIR");
   return `
     <div class="set-row-shell ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">
-      <div class="swipe-delete-rail" aria-hidden="true">Delete</div>
+      <div class="swipe-delete-rail" aria-hidden="true">
+        <button class="swipe-delete" data-action="delete-set" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">Delete</button>
+      </div>
       <div class="set-row ${completedClass}" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" title="${escapeAttr(set.suggestionReason ?? "")}">
         <button class="set-badge ${set.type}" data-action="cycle-set-type" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}">${escapeHtml(set.label)}</button>
         <button class="previous-cell" data-action="open-exercise-history" data-exercise-id="${exercise.id}">
@@ -348,7 +400,7 @@ function renderSetRow(sessionExercise, exercise, set) {
         </button>
         <label class="number-field weight-field">
           <input ${disabledWeight} type="number" inputmode="decimal" min="0" step="${exercise.increment}" data-field="weight" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(weightInput.value)}" placeholder="${escapeAttr(weightInput.placeholder)}">
-          ${deltaText ? `<sup>${escapeHtml(deltaText)}</sup>` : ""}
+          ${deltaText ? `<span class="weight-delta ${deltaClass}" aria-hidden="true">${escapeHtml(deltaText)}</span>` : ""}
         </label>
         <label class="number-field">
           <input type="number" inputmode="numeric" min="0" step="1" data-field="reps" data-session-exercise-id="${sessionExercise.id}" data-set-id="${set.id}" value="${escapeAttr(repsInput.value)}" placeholder="${escapeAttr(repsInput.placeholder)}">
@@ -364,6 +416,22 @@ function renderSetRow(sessionExercise, exercise, set) {
     </div>
   `;
 }
+
+// Expose a minimal API for external UI components (e.g., Preact proof-of-concept)
+window.OverLoaderAPI = window.OverLoaderAPI ?? {};
+Object.assign(window.OverLoaderAPI, {
+  getState: () => state,
+  persist: async () => await persist(),
+  runAction: async (action, dataset) => {
+    // runAction expects an element-like object with .dataset
+    await runAction(action, { dataset: dataset || {} });
+  },
+  deleteSessionSet: async (sessionExerciseId, setId) => {
+    await deleteSessionSet(sessionExerciseId, setId);
+  },
+  closeAllRevealedRows: () => closeAllRevealedRows(),
+  renderApp: () => render()
+});
 
 function setInputDisplay(set, field, rawValue, fallbackPlaceholder) {
   const value = rawValue == null ? "" : String(rawValue);
@@ -738,10 +806,8 @@ function renderModal() {
   if (modal.type === "template-editor") return renderTemplateEditor();
   if (modal.type === "finish-template-choice") return renderFinishTemplateChoice();
   if (modal.type === "start-location") return renderStartLocationModal();
-  if (modal.type === "focus") return renderFocusModal();
   if (modal.type === "data-menu") return renderDataMenu();
   if (modal.type === "cloud-sync") return renderCloudSyncModal();
-  if (modal.type === "session-actions") return renderSessionActions();
   return "";
 }
 
@@ -1074,23 +1140,6 @@ function renderStartLocationModal() {
   `);
 }
 
-function renderFocusModal() {
-  const sessionExercise = state.activeSession?.exercises.find((entry) => entry.id === modal.sessionExerciseId);
-  const exercise = getExercise(state, sessionExercise?.exerciseId);
-  const working = sessionExercise?.sets.filter((set) => set.type === "working") ?? [];
-  const totalVolume = working.reduce((sum, set) => sum + (Math.abs(Number(set.weight)) || 0) * (Number(set.reps) || 0), 0);
-  const totalReps = working.reduce((sum, set) => sum + (Number(set.reps) || 0), 0);
-  const avgWeight = working.length ? working.reduce((sum, set) => sum + (Math.abs(Number(set.weight)) || 0), 0) / working.length : 0;
-  return renderModalFrame("Focus Metric", `
-    <div class="metric-list">
-      <div><strong>Total Volume</strong><span>${formatNumber(totalVolume)} kg</span></div>
-      <div><strong>Total Reps</strong><span>${formatNumber(totalReps)} reps</span></div>
-      <div><strong>Weight/Set</strong><span>${exercise?.loadMode === "bodyweight" ? "BW" : `${formatNumber(avgWeight)} kg`}</span></div>
-      <div><strong>Working Sets</strong><span>${working.length}</span></div>
-    </div>
-  `);
-}
-
 function renderDataMenu() {
   return renderModalFrame("Data", `
     <div class="menu-list">
@@ -1130,23 +1179,15 @@ function renderCloudSyncModal() {
   `);
 }
 
-function renderSessionActions() {
-  const session = state.activeSession;
-  return renderModalFrame("Workout Options", `
-    <div class="menu-list">
-      <button data-action="save-session-template-copy">${icon("plus")} Save as New Template</button>
-      <button data-action="overwrite-session-template-now">${icon("download")} Overwrite Current Template</button>
-      <button data-action="open-add-exercise">${icon("plus")} Add Exercises</button>
-    </div>
-  `, session?.templateDirty ? `<p class="modal-copy">Template changes are pending for this workout.</p>` : "");
-}
-
 async function handleClick(event) {
   if (Date.now() < suppressClickUntil) {
     event.preventDefault();
     event.stopPropagation();
     return;
   }
+  // If the user clicked anywhere, close any revealed swipe rails unless they clicked a swipe button.
+  const swipeBtn = event.target.closest('.swipe-delete');
+  if (!swipeBtn) closeAllRevealedRows();
   const actionTarget = event.target.closest("[data-action], [data-view]");
   const backdrop = event.target.closest(".modal-backdrop");
   if (backdrop && !event.target.closest(".modal-sheet")) {
@@ -1178,6 +1219,14 @@ function handleDragStart(event) {
   row.classList.add("is-dragging");
   event.dataTransfer.effectAllowed = "move";
   event.dataTransfer.setData("text/plain", modal.dragRowId);
+}
+
+function closeAllRevealedRows() {
+  document.querySelectorAll('.set-row-shell.is-revealed').forEach((shell) => {
+    shell.classList.remove('is-revealed');
+    const row = shell.querySelector('.set-row');
+    if (row) row.style.transform = '';
+  });
 }
 
 function handleDragOver(event) {
@@ -1295,16 +1344,22 @@ function autoScrollSessionReorder(clientY) {
 }
 
 function handleSetPointerDown(event) {
+  if (window.OVERLOADER_USE_PREACT_SETROW) return;
   if (sessionReorder?.active || !state.activeSession || event.button > 0 || event.target.closest("input, select, textarea")) return;
   const row = event.target.closest(".set-row:not(.table-head)");
   if (!row) return;
   const shell = row.closest(".set-row-shell");
+  const rail = shell?.querySelector(".swipe-delete-rail");
+  const railWidth = rail ? rail.offsetWidth : 96;
+  const isRevealed = shell?.classList.contains("is-revealed") ?? false;
   setSwipe = {
     row,
     shell,
     pointerId: event.pointerId,
     startX: event.clientX,
     startY: event.clientY,
+    startOffset: isRevealed ? -railWidth : 0,
+    railWidth,
     dx: 0,
     dy: 0,
     active: false
@@ -1317,13 +1372,15 @@ function handleSetPointerMove(event) {
   const dy = event.clientY - setSwipe.startY;
   setSwipe.dx = dx;
   setSwipe.dy = dy;
-  if (dx >= 0 || Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
+  if (Math.abs(dx) < 12 || Math.abs(dx) < Math.abs(dy) * 1.35) return;
   setSwipe.active = true;
   event.preventDefault();
-  setSwipe.row.setPointerCapture?.(event.pointerId);
-  const offset = Math.max(dx, -96);
-  setSwipe.shell?.classList.toggle("is-swiping-delete", Math.abs(offset) > 24);
-  setSwipe.shell?.classList.toggle("is-delete-armed", Math.abs(offset) >= 74);
+  const maxOffset = setSwipe.railWidth;
+  const rawOffset = setSwipe.startOffset + dx;
+  const offset = Math.min(0, Math.max(-maxOffset, rawOffset));
+  const progress = Math.abs(offset) / maxOffset;
+  setSwipe.shell?.classList.toggle("is-swiping-delete", progress > 0.12);
+  setSwipe.shell?.classList.toggle("is-delete-armed", progress >= 0.7);
   setSwipe.row.style.transform = `translateX(${offset}px)`;
 }
 
@@ -1335,11 +1392,18 @@ function handleSetPointerEnd(event) {
     swipe.row.releasePointerCapture(event.pointerId);
   }
   swipe.shell?.classList.remove("is-swiping-delete", "is-delete-armed");
+  const maxOffset = swipe.railWidth || 96;
+  const finalOffset = Math.min(0, Math.max(-maxOffset, swipe.startOffset + swipe.dx));
+  const openThreshold = -maxOffset * 0.35;
+  const shouldReveal = swipe.active && finalOffset <= openThreshold;
+  if (shouldReveal) {
+    suppressClickUntil = Date.now() + 350;
+    swipe.shell.classList.add("is-revealed");
+    swipe.row.style.transform = `translateX(${-maxOffset}px)`;
+    return;
+  }
+  swipe.shell.classList.remove("is-revealed");
   swipe.row.style.transform = "";
-  const shouldDelete = swipe.active && swipe.dx <= -74 && Math.abs(swipe.dx) > Math.abs(swipe.dy) * 1.35;
-  if (!shouldDelete) return;
-  suppressClickUntil = Date.now() + 350;
-  void deleteSessionSet(swipe.row.dataset.sessionExerciseId, swipe.row.dataset.setId);
 }
 
 async function deleteSessionSet(sessionExerciseId, setId) {
@@ -1370,6 +1434,7 @@ async function runAction(action, target) {
         return;
       }
       state.activeSession = createSessionFromTemplate(state, modal.templateId, location);
+      expandedExerciseContexts.clear();
       state.settings.lastWorkoutLocation = location;
       currentView = "workout";
       modal = null;
@@ -1399,7 +1464,16 @@ async function runAction(action, target) {
     case "cancel-workout":
       if (!confirm("Cancel this workout? Unsaved set rows will be lost.")) return;
       state.activeSession = null;
+      expandedExerciseContexts.clear();
       await persist();
+      render();
+      break;
+    case "toggle-exercise-context":
+      if (expandedExerciseContexts.has(target.dataset.sessionExerciseId)) {
+        expandedExerciseContexts.delete(target.dataset.sessionExerciseId);
+      } else {
+        expandedExerciseContexts.add(target.dataset.sessionExerciseId);
+      }
       render();
       break;
     case "toggle-set-complete":
@@ -1435,10 +1509,6 @@ async function runAction(action, target) {
       break;
     case "open-exercise-menu":
       modal = { type: "exercise-menu", sessionExerciseId: target.dataset.sessionExerciseId };
-      render();
-      break;
-    case "open-focus":
-      modal = { type: "focus", sessionExerciseId: target.dataset.sessionExerciseId };
       render();
       break;
     case "replace-exercise":
@@ -1495,6 +1565,16 @@ async function runAction(action, target) {
       modal = null;
       await persist();
       render();
+      break;
+    case "delete-set":
+      // Delete the set after user confirmed via revealed button
+      if (!target.dataset.sessionExerciseId || !target.dataset.setId) return;
+      // If the set row is revealed, remove the reveal state so UI updates cleanly
+      const shell = target.closest('.set-row-shell');
+      if (shell) {
+        shell.classList.remove('is-revealed');
+      }
+      await deleteSessionSet(target.dataset.sessionExerciseId, target.dataset.setId);
       break;
     case "add-note": {
       const note = prompt("Exercise note");
@@ -1728,29 +1808,6 @@ async function runAction(action, target) {
       modal = { type: "data-menu" };
       render();
       break;
-    case "open-template-session-actions":
-      modal = { type: "session-actions" };
-      render();
-      break;
-    case "save-session-template-copy": {
-      const name = prompt("New template name", `${state.activeSession?.templateName ?? "Workout"} Copy`);
-      if (name?.trim()) {
-        saveActiveAsNewTemplate(state, name.trim());
-        modal = null;
-        await persist();
-        renderToast("Template saved");
-        render();
-      }
-      break;
-    }
-    case "overwrite-session-template-now":
-      if (!confirm("Overwrite the current template with this workout layout?")) return;
-      overwriteTemplateFromActive(state);
-      modal = null;
-      await persist();
-      renderToast("Template overwritten");
-      render();
-      break;
     case "reset-seed":
       if (!confirm("Reload seed data and clear local edits/history?")) return;
       localStorage.removeItem("overloader-state");
@@ -1775,6 +1832,7 @@ async function finishWorkout() {
   if (!completedSets && !confirm("No sets are checked complete, so no exercise history will be saved. Finish and discard this workout?")) return;
   const result = finishActiveSession(state);
   state = result.state;
+  expandedExerciseContexts.clear();
   modal = null;
   await persist();
   renderToast(`${result.savedCount} exercise logs saved`);
@@ -2748,7 +2806,7 @@ async function registerServiceWorker() {
       refreshing = true;
       window.location.reload();
     });
-    const registration = await navigator.serviceWorker.register("./sw.js?v=1.4.2", { updateViaCache: "none" });
+    const registration = await navigator.serviceWorker.register("./sw.js?v=1.4.4", { updateViaCache: "none" });
     await registration.update();
   } catch (error) {
     console.warn("Service worker registration failed", error);

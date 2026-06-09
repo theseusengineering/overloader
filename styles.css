@@ -151,10 +151,10 @@ svg {
   top: 0;
   z-index: 20;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.75rem 0 1rem;
+  padding: 0 0 0.9rem;
   background: linear-gradient(180deg, rgba(13, 18, 21, 0.98), rgba(13, 18, 21, 0.74));
   backdrop-filter: blur(18px);
   border-bottom: 1px solid rgba(255, 255, 255, 0.045);
@@ -162,8 +162,8 @@ svg {
 
 .top-title {
   display: grid;
-  justify-items: center;
-  gap: 0.3rem;
+  justify-items: start;
+  gap: 0.16rem;
   min-width: 0;
 }
 
@@ -186,12 +186,11 @@ svg {
   font-style: normal;
 }
 
-.grabber {
-  width: 3.4rem;
-  height: 0.42rem;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.7);
-  box-shadow: 0 1px 8px rgba(255, 255, 255, 0.12);
+.top-subtitle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.18rem;
+  min-width: 0;
 }
 
 .icon-button,
@@ -250,11 +249,16 @@ svg {
 }
 
 .session-meta {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
   gap: 1rem;
-  margin: 1rem 0 1.75rem;
+  margin: 0.2rem 0 1.45rem;
+}
+
+.session-date {
+  color: var(--muted);
+  font-weight: 750;
 }
 
 h1,
@@ -314,11 +318,22 @@ h1 {
   background: transparent;
   color: var(--blue);
   text-align: left;
-  font-size: 1.65rem;
+  /* Allow the grid item to shrink and the text to scale down based on char count.
+     `min-width: 0` ensures overflow:hidden & ellipsis work inside grid containers. */
+  min-width: 0;
+  font-size: clamp(0.65rem, calc(18rem / var(--char-count, 20)), 1.6rem);
   line-height: 1.15;
   font-weight: 800;
   cursor: pointer;
   text-underline-offset: 0.18rem;
+  /* Allow wrapping to up to two lines on narrow screens so long names remain readable.
+     Use -webkit-line-clamp for multiline ellipsis with a graceful fallback. */
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .exercise-tools {
@@ -348,6 +363,23 @@ h1 {
   font-weight: 800;
 }
 
+.context-toggle {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+  text-align: left;
+  font-weight: 780;
+  text-decoration: underline;
+  text-underline-offset: 0.18rem;
+  cursor: pointer;
+}
+
+.exercise-context-panel {
+  display: grid;
+  gap: 0.55rem;
+}
+
 .previous-context {
   color: var(--faint);
   font-weight: 700;
@@ -371,29 +403,29 @@ h1 {
   position: relative;
   overflow: hidden;
   border-radius: var(--radius);
+  --swipe-rail-width: 6.75rem;
 }
 
 .swipe-delete-rail {
   position: absolute;
   inset: 0 0 0 auto;
-  width: 6rem;
+  width: var(--swipe-rail-width);
   display: flex;
   align-items: center;
   justify-content: flex-end;
+  gap: 0;
   box-sizing: border-box;
-  padding-right: 0.9rem;
+  padding: 0.5rem;
   border-radius: var(--radius);
-  background: rgba(255, 90, 103, 0.18);
+  background: rgba(255, 90, 103, 0.08);
   color: var(--red);
   font-weight: 900;
   letter-spacing: 0;
   opacity: 0;
   pointer-events: none;
   z-index: 2;
-  box-shadow: inset 0 0 0 1px rgba(255, 90, 103, 0.2);
-  transition:
-    background-color var(--speed-fast) ease,
-    color var(--speed-fast) ease;
+  box-shadow: inset 0 0 0 1px rgba(255, 90, 103, 0.06);
+  transition: opacity var(--speed-fast) ease, transform var(--speed-fast) ease;
 }
 
 .set-row-shell.is-swiping-delete .swipe-delete-rail {
@@ -413,11 +445,34 @@ h1 {
   opacity: 0;
 }
 
+/* When revealed, show the rail and allow pointer interaction */
+.set-row-shell.is-revealed .swipe-delete-rail {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.set-row-shell.is-revealed .set-row {
+  transform: translateX(calc(-1 * var(--swipe-rail-width)));
+}
+
+.swipe-delete-rail .swipe-delete {
+  border: 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 800;
+}
+
+.swipe-delete-rail .swipe-delete {
+  background: linear-gradient(180deg, #ff7b87, #ff5a67);
+  color: white;
+}
+
 .set-row {
   display: grid;
-  grid-template-columns: minmax(2.8rem, 0.55fr) minmax(8.7rem, 2.15fr) minmax(5.2rem, 1.45fr) minmax(4.7rem, 1.1fr) minmax(4.15rem, 0.86fr) minmax(4.15rem, 0.86fr) minmax(3rem, 0.5fr);
+  grid-template-columns: 2.8rem minmax(0, 1.6fr) minmax(4.9rem, 1.08fr) minmax(4.3rem, 0.92fr) minmax(4.15rem, 0.86fr) minmax(4.15rem, 0.86fr) 2.9rem;
   align-items: center;
-  gap: 0.55rem;
+  gap: 0.42rem;
   min-height: 3.7rem;
   border-radius: var(--radius);
   position: relative;
@@ -466,7 +521,7 @@ h1 {
   border: 0;
   border-radius: var(--radius);
   min-width: 2.8rem;
-  min-height: 2.8rem;
+  min-height: 2.85rem;
   background: linear-gradient(180deg, var(--field-raised), var(--field));
   color: var(--text);
   font-weight: 900;
@@ -513,7 +568,7 @@ h1 {
 }
 
 .weight-field {
-  padding-top: 0.78rem;
+  padding-top: 0;
 }
 
 .number-field input {
@@ -545,14 +600,21 @@ h1 {
   opacity: 1;
 }
 
-.number-field sup {
+.weight-delta {
   position: absolute;
-  right: 0.35rem;
-  top: 0;
+  top: 0.34rem;
+  left: calc(50% + 0.7rem);
+  transform: translateX(0);
   color: var(--green);
-  font-size: 0.67rem;
+  font-size: 0.62rem;
   font-weight: 850;
   line-height: 1;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.weight-delta.is-negative {
+  color: var(--red);
 }
 
 .check-button {
@@ -1607,8 +1669,8 @@ button:active,
   }
 
   .set-row {
-    grid-template-columns: 2.8rem minmax(6.7rem, 1.7fr) minmax(4.25rem, 1fr) minmax(4rem, 0.9fr) minmax(3.7rem, 0.7fr) minmax(3.7rem, 0.7fr) 2.8rem;
-    gap: 0.36rem;
+    grid-template-columns: 2.8rem minmax(0, 1.45fr) minmax(4.2rem, 0.98fr) minmax(3.95rem, 0.9fr) minmax(3.7rem, 0.74fr) minmax(3.7rem, 0.74fr) 2.8rem;
+    gap: 0.28rem;
   }
 
   .number-field input {
@@ -1642,8 +1704,8 @@ button:active,
 
 @media (max-width: 560px) {
   .set-row {
-    grid-template-columns: 2.15rem minmax(0, 1fr) 3.5rem 2.8rem 2.5rem 2.5rem 2.2rem;
-    gap: 0.2rem;
+    grid-template-columns: 2.2rem minmax(0, 1fr) 3.75rem 3.1rem 2.85rem 2.85rem 2.2rem;
+    gap: 0.16rem;
     min-height: 3.2rem;
   }
 
@@ -1652,15 +1714,15 @@ button:active,
   }
 
   .set-badge {
-    min-width: 2.15rem;
-    min-height: 2.15rem;
+    min-width: 2.2rem;
+    min-height: 2.35rem;
     font-size: 0.95rem;
     border-radius: 6px;
   }
 
   .check-button {
     min-width: 2.2rem;
-    min-height: 2.2rem;
+    min-height: 2.35rem;
     border-radius: 6px;
   }
 
@@ -1668,18 +1730,18 @@ button:active,
     font-size: 0.72rem;
   }
 
-  .number-field.compact input {
-    min-height: 1.8rem;
-    font-size: 0.72rem;
-    font-weight: 800;
-  }
-
   .number-field input {
+    min-height: 2.35rem;
     font-size: 0.92rem;
   }
 
+  .number-field.compact input {
+    font-size: 0.92rem;
+    font-weight: 850;
+  }
+
   .weight-field {
-    padding-top: 0.66rem;
+    padding-top: 0;
   }
 
   .previous-cell {
@@ -1687,9 +1749,9 @@ button:active,
     line-height: 1.1;
   }
 
-  .number-field sup {
-    right: 0.18rem;
-    top: 0.03rem;
+  .weight-delta {
+    top: 0.3rem;
+    left: calc(50% + 0.56rem);
     font-size: 0.5rem;
   }
 
